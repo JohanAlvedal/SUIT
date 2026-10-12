@@ -1,3 +1,9 @@
+# SUIT for Ubuntu and Fedora (community fork)
+
+The Ubuntu development instructions and known limitations are in [docs/ubuntu.md](docs/ubuntu.md). Fedora documentation from the upstream project is preserved below.
+
+---
+
 <div align="center">
   <img src="assets/icons/suit-icon.png" alt="SUIT for Fedora Logo" width="120">
   <h1>SUIT for Fedora</h1>
