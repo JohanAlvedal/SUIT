@@ -1,39 +1,49 @@
 #!/usr/bin/env bash
-set -e
+# SUIT installer for Fedora and Ubuntu Desktop.
+set -Eeuo pipefail
 
-echo "========================================="
-echo "   SUIT for Fedora - Automated Setup    "
-echo "========================================="
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source /etc/os-release
 
-# 1. Check Fedora environment
-if [ ! -f /etc/fedora-release ]; then
-    echo "Warning: /etc/fedora-release not detected. SUIT is optimized for Fedora Linux."
+case "${ID:-}" in
+  ubuntu)
+    DISTRO="ubuntu"
+    PACKAGES=(python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
+              python3-evdev python3-qrcode python3-opencv python3-numpy
+              git xdg-user-dirs)
+    ;;
+  fedora)
+    DISTRO="fedora"
+    PACKAGES=(python3 python3-gobject libadwaita python3-evdev
+              python3-qrcode python3-opencv git)
+    ;;
+  *)
+    echo "Unsupported distribution: ${PRETTY_NAME:-unknown}." >&2
+    echo "Currently supported: Ubuntu Desktop and Fedora Workstation." >&2
+    exit 1
+    ;;
+esac
+
+echo "SUIT setup for ${PRETTY_NAME} (${DISTRO})"
+if [[ "${1:-}" == "--check" ]]; then
+  echo "Read-only check: planned packages: ${PACKAGES[*]}"
+  echo "The legacy uninstaller is never run automatically."
+  exit 0
+fi
+if [[ $# -ne 0 ]]; then
+  echo "Usage: ./install.sh [--check]" >&2
+  exit 2
 fi
 
-# 2. Clean up legacy SUIT artifacts if present
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/uninstall_legacy.sh" ]; then
-    "${SCRIPT_DIR}/uninstall_legacy.sh"
+# Package installation is the only privileged action performed by this script.
+# Do not run the legacy uninstaller or change sudoers, login or keyring settings.
+if [[ "$DISTRO" == "ubuntu" ]]; then
+  sudo apt-get update
+  sudo apt-get install -y --no-install-recommends "${PACKAGES[@]}"
+else
+  sudo dnf install -y --setopt=install_weak_deps=False "${PACKAGES[@]}"
 fi
 
-# 3. Install native system dependencies via DNF
-echo "[1/3] Installing system packages..."
-sudo dnf install -y --setopt=install_weak_deps=False \
-    python3 \
-    python3-gobject \
-    libadwaita \
-    python3-evdev \
-    python3-qrcode \
-    python3-opencv \
-    git
-
-# 4. Create Application and Desktop Launchers
-echo "[2/3] Generating desktop and menu launchers..."
-python3 "${SCRIPT_DIR}/create_launcher.py"
-
-# 4. Success confirmation
-echo "[3/3] Installation completed successfully!"
-echo "========================================="
-echo "SUIT is now installed and ready to use."
-echo "Launch SUIT from your application menu or Dash favorites."
-echo "========================================="
+python3 "$ROOT/create_launcher.py"
+echo "SUIT installed. Start it from the Applications menu."
+echo "Some advanced Fedora-specific controls remain unavailable on Ubuntu."
