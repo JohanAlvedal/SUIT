@@ -1,11 +1,15 @@
 # Ubuntu support (work in progress)
 
 This branch adapts IteraThor's **SUIT for Fedora** to **Ubuntu Desktop** while
-preserving Fedora support and the original MIT license.
+retaining the original Fedora installation path and the MIT license. Fedora
+feature parity is not yet regression-tested after the safety changes.
 
 ## Safe installation on Ubuntu
 
-For Ubuntu Desktop with GNOME, run:
+For Ubuntu Desktop **24.04 LTS or newer**, running GNOME, use:
+SUIT uses `Adw.NavigationView` (libadwaita >= 1.4); Ubuntu 22.04 ships
+libadwaita 1.1 and cannot run this GTK4 UI without an unsupported upgrade.
+
 
 ```bash
 git clone --branch feature/ubuntu-support https://github.com/JohanAlvedal/SUIT.git
@@ -48,4 +52,25 @@ passwordless sudo. No root account or global Python pip installation is needed.
 5. Verify no unexpected sudoers rules, old service removals or keyring resets.
 6. Only then test optional startup or login settings, with a backup available.
 
-The parent project remains at https://github.com/IteraThor/SUIT.
+## Fedora installation
+
+The same development branch supports Fedora using `dnf`:
+
+```bash
+git clone --branch feature/ubuntu-support https://github.com/JohanAlvedal/SUIT.git
+cd SUIT
+./install.sh --check
+./install.sh
+```
+
+The original Fedora application features are retained as a goal, but the new
+per-action authorization model and installer require real Fedora regression
+testing before a production release or upstream merge.
+
+## Contributing upstream
+
+After hardware verification, open a PR from
+`JohanAlvedal:feature/ubuntu-support` to `IteraThor/SUIT:main`.
+Update repository URLs in the installation examples once merged.
+
+Original project: https://github.com/IteraThor/SUIT.
