@@ -4,6 +4,7 @@ import subprocess
 import sys
 import shutil
 import ast
+from core.package_manager import distribution_id
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
@@ -45,7 +46,7 @@ def check_system_dependencies():
         if Path("/etc/fedora-release").exists():
             print("Please run: sudo dnf install -y python3-gobject libadwaita python3-pip python3-evdev git")
         else:
-            print("Please install GTK4 and Libadwaita packages for your distribution.")
+            print("On Ubuntu, run ./install.sh to install GTK4 and Libadwaita dependencies.")
         return False
     return True
 
@@ -84,7 +85,7 @@ def create_desktop_launcher():
 
     desktop_entry = f"""[Desktop Entry]
 Version=1.0
-Name=SUIT for Fedora
+Name=SUIT for Ubuntu and Fedora
 Comment=Setup Utilities by IteraThor (GTK4 / Libadwaita)
 Exec=/usr/bin/python3 {PROJECT_DIR}/app_gtk.py
 Icon=de.iterathor.suit.gtk
