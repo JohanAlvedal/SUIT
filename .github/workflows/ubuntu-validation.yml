@@ -1,0 +1,25 @@
+name: Ubuntu compatibility checks
+
+on:
+  push:
+    branches: [feature/ubuntu-support]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate installer syntax and read-only preflight
+        run: |
+          bash -n install.sh
+          bash install.sh --check
+      - name: Compile Python sources (does not start SUIT)
+        run: |
+          python3 -m compileall -q app_gtk.py create_launcher.py core modules_gtk kiosk_extension/host
+      - name: Non-destructive regression tests
+        run: |
+          python3 -m unittest discover -s tests -v
