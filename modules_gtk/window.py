@@ -163,11 +163,11 @@ class SuitWindow(Adw.ApplicationWindow):
 
         if page and page != self.menu_page:
             self.btn_back.set_visible(True)
-            self.title_widget.set_title(page.get_title() or "SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
-            self.title_widget.set_subtitle("SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
+            self.title_widget.set_title(page.get_title() or self.get_title())
+            self.title_widget.set_subtitle(self.get_title())
         else:
             self.btn_back.set_visible(False)
-            self.title_widget.set_title("SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
+            self.title_widget.set_title(self.get_title())
             self.title_widget.set_subtitle("")
 
         self._adapt_window_size_for_page(page)
@@ -254,7 +254,7 @@ class SuitWindow(Adw.ApplicationWindow):
             logger.exception("Camera Manual Tool unavailable due to missing dependency: %s", e)
             dialog = Adw.AlertDialog(
                 heading="OpenCV Required",
-                body="Camera Manual Mode requires OpenCV.\n\nInstall with: sudo dnf install python3-opencv"
+                body="Camera Manual Mode requires OpenCV.\n\nInstall required dependencies with: ./install.sh"
             )
             dialog.add_response("ok", "OK")
             dialog.present(self)
@@ -279,7 +279,7 @@ class SuitWindow(Adw.ApplicationWindow):
             logger.exception("Camera Optimizer unavailable due to missing dependency: %s", e)
             dialog = Adw.AlertDialog(
                 heading="OpenCV Required",
-                body="Camera Optimizer requires OpenCV.\n\nInstall with: sudo dnf install python3-opencv"
+                body="Camera Optimizer requires OpenCV.\n\nInstall required dependencies with: ./install.sh"
             )
             dialog.add_response("ok", "OK")
             dialog.present(self)
@@ -304,7 +304,7 @@ class SuitWindow(Adw.ApplicationWindow):
             logger.exception("Camera Focus Tool unavailable due to missing dependency: %s", e)
             dialog = Adw.AlertDialog(
                 heading="OpenCV Required",
-                body="The Camera Focus Tool requires OpenCV.\n\nInstall with: sudo dnf install python3-opencv"
+                body="The Camera Focus Tool requires OpenCV.\n\nInstall required dependencies with: ./install.sh"
             )
             dialog.add_response("ok", "OK")
             dialog.present(self)
