@@ -3,6 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from core.logger import get_logger
+from core.package_manager import distribution_id
 
 logger = get_logger("kiosk")
 
@@ -89,6 +90,10 @@ class KioskService:
         """
         conf_file = chromium_conf or cls.CHROMIUM_CONF_PATH
         desk_file = desktop_path or cls.USER_DESKTOP_PATH
+        if distribution_id() == "ubuntu":
+            return (False, "Permanent Chromium extension installation is not validated "
+                           "with Ubuntu's sandboxed Chromium Snap. Use kiosk without "
+                           "permanent controls or a separate browser extension.")
 
         try:
             # 1. Sync extension files to persistent user data directory
