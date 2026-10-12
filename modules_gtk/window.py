@@ -7,14 +7,14 @@ import threading
 from pathlib import Path
 
 from core.logger import get_logger
-from core.privileges import check_sudo_privileges, setup_sudoers_pkexec
+from core.package_manager import distribution_id
 from modules_gtk.menu import MainMenuView
 
 logger = get_logger("window")
 
 class SuitWindow(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="SUIT for Fedora")
+        super().__init__(application=app, title="SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
         # Determine monitor size for display-aware default window bounds
         display = Gdk.Display.get_default()
         screen_w, screen_h = 1280, 800
@@ -77,7 +77,7 @@ class SuitWindow(Adw.ApplicationWindow):
         self.header_bar.pack_start(self.btn_back)
 
         # Title Widget
-        self.title_widget = Adw.WindowTitle(title="SUIT for Fedora")
+        self.title_widget = Adw.WindowTitle(title=self.get_title())
         self.header_bar.set_title_widget(self.title_widget)
 
         # Navigation View (smooth hardware-accelerated transitions)
@@ -102,8 +102,7 @@ class SuitWindow(Adw.ApplicationWindow):
         self._last_visible_page = self.menu_page
         self.nav_view.push(self.menu_page)
 
-        # Check privilege escalation on first run
-        GLib.idle_add(self._check_first_run_privileges)
+        # Never ask for blanket passwordless administrator access on startup.
 
         # Background pre-warm heavy dependencies (OpenCV, GStreamer, CameraFocusView)
         self._start_background_prewarm()
@@ -151,32 +150,6 @@ class SuitWindow(Adw.ApplicationWindow):
 
         threading.Thread(target=_bg_prewarm, daemon=True, name="suit-prewarm").start()
 
-    def _check_first_run_privileges(self):
-        if not check_sudo_privileges():
-            dialog = Adw.AlertDialog(
-                heading="Administrator Privileges Required",
-                body="SUIT requires administrator rights to configure systemd background services, kiosk mode, and system settings without interrupting you.\n\nAuthorize once to enable seamless passwordless access for future runs?"
-            )
-            dialog.add_response("cancel", "Not Now")
-            dialog.add_response("auth", "Authorize")
-            dialog.set_response_appearance("auth", Adw.ResponseAppearance.SUGGESTED)
-
-            def on_response(d, response):
-                if response == "auth":
-                    def _do_auth():
-                        ok, msg = setup_sudoers_pkexec()
-                        def _notify():
-                            if ok:
-                                self.show_toast("Administrator privileges successfully authorized.")
-                            else:
-                                self.show_toast("Authorization was not completed.")
-                        GLib.idle_add(_notify)
-                    threading.Thread(target=_do_auth, daemon=True).start()
-
-            dialog.connect("response", on_response)
-            dialog.present(self)
-        return False
-
     def _on_nav_changed(self, *args):
         """Updates back button visibility and title according to current page."""
         page = self.nav_view.get_visible_page()
@@ -190,11 +163,11 @@ class SuitWindow(Adw.ApplicationWindow):
 
         if page and page != self.menu_page:
             self.btn_back.set_visible(True)
-            self.title_widget.set_title(page.get_title() or "SUIT for Fedora")
-            self.title_widget.set_subtitle("SUIT for Fedora")
+            self.title_widget.set_title(page.get_title() or "SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
+            self.title_widget.set_subtitle("SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
         else:
             self.btn_back.set_visible(False)
-            self.title_widget.set_title("SUIT for Fedora")
+            self.title_widget.set_title("SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
             self.title_widget.set_subtitle("")
 
         self._adapt_window_size_for_page(page)
