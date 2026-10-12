@@ -4,6 +4,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 import getpass
 from core.system_service import SystemService
+from core.package_manager import distribution_id
 from modules_gtk.async_utils import run_async
 from modules_gtk.ui_helpers import (
     copy_to_clipboard,
@@ -446,6 +447,9 @@ class SystemView(Adw.NavigationPage):
     # Callbacks and Action Handlers
     # -------------------------------------------------------------------------
     def _on_apply_all_clicked(self, btn):
+        if distribution_id() == "ubuntu":
+            self.window.show_toast("Apply All is disabled on Ubuntu. Use individual settings.")
+            return
         dialog = Adw.AlertDialog(
             heading="Use Touchscreen Tweaks?",
             body=(
