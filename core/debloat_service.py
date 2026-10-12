@@ -4,6 +4,7 @@ import ast
 import re
 import shutil
 from core.logger import get_logger
+from core.package_manager import distribution_id, install_packages
 
 logger = get_logger("debloat")
 
@@ -88,6 +89,19 @@ class DebloatService:
     @classmethod
     def get_installed_bloatware(cls, package_list: list[str] | None = None) -> list[str]:
         pkgs = package_list or cls.BLOATWARE_PACKAGES
+        if distribution_id() == "ubuntu":
+            installed = []
+            for pkg in pkgs:
+                try:
+                    result = subprocess.run(
+                        ["dpkg-query", "-W", "-f=${Status}", pkg],
+                        capture_output=True, text=True, timeout=3
+                    )
+                    if result.returncode == 0 and result.stdout.strip() == "install ok installed":
+                        installed.append(pkg)
+                except OSError:
+                    break
+            return installed
         try:
             res = subprocess.run(
                 ["rpm", "-q"] + pkgs,
@@ -146,6 +160,9 @@ class DebloatService:
     def debloat_packages(cls, packages: list[str], progress_callback=None) -> tuple[bool, str]:
         if not packages:
             return True, "No packages selected for removal."
+        if distribution_id() == "ubuntu":
+            return False, ("Automatic package removal is disabled on Ubuntu. "
+                           "Use your system package manager to review dependencies first.")
 
         try:
             cmd = ["sudo", "-n", "dnf", "remove", "-y"] + packages
@@ -241,10 +258,12 @@ class DebloatService:
 
     @classmethod
     def install_chromium(cls) -> tuple[bool, str]:
-        try:
-            subprocess.run(["sudo", "-n", "dnf", "install", "-y", "chromium"], check=True, capture_output=True)
-            cls.add_favorite_app("chromium-browser.desktop")
-            return True, "Chromium installed and pinned to Dash."
-        except Exception as e:
-            logger.exception("Failed installing Chromium")
-            return False, f"Failed installing Chromium: {e}"
+        package = "chromium-browser" if distribution_id() == "ubuntu" else "chromium"
+        ok, msg = install_packages([package])
+        if not ok:
+            return False, msg
+        if distribution_id() == "ubuntu":
+            cls.add_favorite_app("chromium_chromium.desktop")
+            return True, "Chromium Snap installed. Verify kiosk extension support separately."
+        cls.add_favorite_app("chromium-browser.desktop")
+        return True, "Chromium installed and pinned to Dash."
