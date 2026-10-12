@@ -1,11 +1,13 @@
 import subprocess
+import shutil
 import re
+from core.package_manager import distribution_id
 from pathlib import Path
 from core.logger import get_logger
 
 logger = get_logger("power")
 
-DEFAULT_GDM_CONFIG = Path("/etc/gdm/custom.conf")
+DEFAULT_GDM_CONFIG = Path("/etc/gdm3/custom.conf") if distribution_id() == "ubuntu" else Path("/etc/gdm/custom.conf")
 
 
 class PowerService:
@@ -20,6 +22,9 @@ class PowerService:
     @staticmethod
     def is_performance_profile_active(profile: str = "throughput-performance") -> bool:
         try:
+            if distribution_id() == "ubuntu" and shutil.which("powerprofilesctl"):
+                res = subprocess.run(["powerprofilesctl", "get"], capture_output=True, text=True)
+                return res.returncode == 0 and res.stdout.strip() == "performance"
             res = subprocess.run(["tuned-adm", "active"], capture_output=True, text=True)
             return profile in res.stdout
         except Exception:
@@ -29,8 +34,11 @@ class PowerService:
     @staticmethod
     def set_performance_profile(profile: str = "throughput-performance") -> bool:
         try:
-            subprocess.run(["sudo", "-n", "tuned-adm", "profile", profile], check=True, capture_output=True)
-            logger.info(f"Set tuned-adm profile to {profile}")
+            if distribution_id() == "ubuntu" and shutil.which("powerprofilesctl"):
+                subprocess.run(["powerprofilesctl", "set", "performance"], check=True, capture_output=True)
+            else:
+                subprocess.run(["sudo", "-n", "tuned-adm", "profile", profile], check=True, capture_output=True)
+            logger.info("Set system performance profile")
             return True
         except Exception:
             logger.exception(f"Failed setting tuned-adm profile to {profile}")
