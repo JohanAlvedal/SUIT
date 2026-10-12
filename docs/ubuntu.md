@@ -32,6 +32,8 @@ passwordless sudo. No root account or global Python pip installation is needed.
 - Ubuntu package-removal/"debloat" and automatic Waydroid setup are disabled
   pending a package and platform review.
 - Passwordless sudo is never automatically provisioned in this fork.
+- Explicit administrator changes request Polkit authorization; touch calibration still needs hardware validation.
+- Permanent Chromium Snap in-page controls installation is disabled pending testing.
 - An app update uses a fast-forward only on the **current checked-out branch**;
   it must never hard-reset local changes or swap branches.
 - Fedora-specific system settings may remain unavailable on Ubuntu.
