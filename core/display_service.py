@@ -10,6 +10,7 @@ gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
 from gi.repository import Gio, GLib
 from core.logger import get_logger
+from core.admin import admin_prefix
 
 logger = get_logger("display")
 
@@ -308,12 +309,12 @@ class DisplayService:
     def write_udev_rule(touch_device_name: str | None, matrix_str: str | None) -> bool:
         try:
             if not touch_device_name or touch_device_name == "None" or not matrix_str:
-                subprocess.run(["sudo", "-n", "rm", "-f", UDEV_RULE_PATH], capture_output=True, check=True)
-                subprocess.run(["sudo", "-n", "udevadm", "control", "--reload-rules"], capture_output=True, check=True)
+                subprocess.run([*admin_prefix(), "rm", "-f", UDEV_RULE_PATH], capture_output=True, check=True)
+                subprocess.run([*admin_prefix(), "udevadm", "control", "--reload-rules"], capture_output=True, check=True)
                 # Trigger input subsystem re-evaluation so stale LIBINPUT_CALIBRATION_MATRIX
                 # entries in /run/udev/data/ are cleared for already-connected devices.
                 subprocess.run(
-                    ["sudo", "-n", "udevadm", "trigger", "--subsystem-match=input"],
+                    [*admin_prefix(), "udevadm", "trigger", "--subsystem-match=input"],
                     capture_output=True,
                     check=True,
                 )
@@ -327,19 +328,19 @@ class DisplayService:
                 f'ENV{{LIBINPUT_CALIBRATION_MATRIX}}="{matrix_str}"\n'
             )
             subprocess.run(
-                ["sudo", "-n", "tee", UDEV_RULE_PATH],
+                [*admin_prefix(), "tee", UDEV_RULE_PATH],
                 input=udev_rule,
                 text=True,
                 capture_output=True,
                 check=True,
             )
             subprocess.run(
-                ["sudo", "-n", "udevadm", "control", "--reload-rules"],
+                [*admin_prefix(), "udevadm", "control", "--reload-rules"],
                 capture_output=True,
                 check=True,
             )
             subprocess.run(
-                ["sudo", "-n", "udevadm", "trigger", "--subsystem-match=input"],
+                [*admin_prefix(), "udevadm", "trigger", "--subsystem-match=input"],
                 capture_output=True,
                 check=True,
             )
@@ -386,12 +387,12 @@ class DisplayService:
             if bus_id:
                 logger.info(f"Rebinding USB touch device {bus_id} to apply calibration matrix")
                 subprocess.run(
-                    ["sudo", "-n", "tee", "/sys/bus/usb/drivers/usb/unbind"],
+                    [*admin_prefix(), "tee", "/sys/bus/usb/drivers/usb/unbind"],
                     input=f"{bus_id}\n", text=True, capture_output=True, check=True,
                 )
                 time.sleep(1.0)
                 subprocess.run(
-                    ["sudo", "-n", "tee", "/sys/bus/usb/drivers/usb/bind"],
+                    [*admin_prefix(), "tee", "/sys/bus/usb/drivers/usb/bind"],
                     input=f"{bus_id}\n", text=True, capture_output=True, check=True,
                 )
                 return True
