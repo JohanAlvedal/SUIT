@@ -1,44 +1,85 @@
-# SUIT for Ubuntu and Fedora (community fork)
-
-The Ubuntu development instructions and known limitations are in [docs/ubuntu.md](docs/ubuntu.md). Fedora documentation from the upstream project is preserved below.
-
----
-
 <div align="center">
-  <img src="assets/icons/suit-icon.png" alt="SUIT for Fedora Logo" width="120">
-  <h1>SUIT for Fedora</h1>
-  <p><strong>Setup Utilities by IteraThor for Autodarts on Fedora Linux</strong></p>
+  <img src="assets/icons/suit-icon.png" alt="SUIT icon" width="120">
+  <h1>SUIT for Autodarts</h1>
+  <p><strong>Setup Utilities by IteraThor — Fedora and Ubuntu Desktop</strong></p>
 </div>
 
----
+> **Community development branch:** This is JohanAlvedal's Ubuntu support proposal
+> based on [IteraThor/SUIT](https://github.com/IteraThor/SUIT). The Ubuntu port is
+> under development and has **not yet been validated on physical hardware**.
+> Features described below are inherited from upstream and may not work on both
+> distributions yet.
 
-## Quick Install
+## Platform status
 
-To install SUIT, copy and run this single command in your terminal:
+| Platform | Status | Notes |
+| --- | --- | --- |
+| Fedora Workstation | Original upstream target | The installer retains `dnf`; Fedora regression testing is still needed for this fork. |
+| Ubuntu Desktop 24.04 LTS or newer (GNOME) | Experimental | Installer uses `apt`; graphical and camera tests still needed on a real machine. |
+| Ubuntu 22.04 and older | Not supported | SUIT uses `Adw.NavigationView`, which requires libadwaita 1.4 or newer. |
+
+## Installation
+
+Install from a **logged-in graphical desktop session**. Use the steps for your
+distribution below. SUIT is a management GUI; install/configure Autodarts itself
+separately.
+
+### Ubuntu Desktop (24.04 LTS or newer)
 
 ```bash
-git clone https://github.com/IteraThor/SUIT.git && cd SUIT && chmod +x install.sh && ./install.sh
+git clone --branch feature/ubuntu-support https://github.com/JohanAlvedal/SUIT.git
+cd SUIT
+./install.sh --check     # Safe preview: does not change the computer
+./install.sh             # Uses apt and creates a SUIT application launcher
 ```
 
-Launch **SUIT for Fedora** directly from your application menu or Dash favorites once installed.
-
----
-
-## Upgrading from Old SUIT (Cleanup & Uninstall)
-
-If you have an older installation of SUIT (Tkinter / Ubuntu edition), run this one-line command to remove legacy background services, outdated autostarts, and old touch rules:
+### Fedora Workstation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/IteraThor/SUIT/main/uninstall_legacy.sh | bash
+git clone --branch feature/ubuntu-support https://github.com/JohanAlvedal/SUIT.git
+cd SUIT
+./install.sh --check     # Safe preview: does not change the computer
+./install.sh             # Uses dnf and creates a SUIT application launcher
 ```
 
-*(Or run `./uninstall_legacy.sh` from within the cloned SUIT directory).*
+After installation, launch **SUIT (Autodarts)** from the application menu.
 
-This automatically cleans:
-* Legacy background services (`suit-killswitch.service`, `autoglow.service`).
-* Legacy touch rotation rules (`/etc/udev/rules.d/99-suit-touch.rules`).
-* Old autostart entries (`suit-rotation.desktop`, `suit-chromium.desktop`).
-* Outdated desktop launchers.
+**Important:** The installer does not uninstall the previous SUIT version,
+change sudoers/Polkit policy, disable screen locking, reset keyrings, or change
+Autodarts services. Do not run the optional legacy cleanup script without
+reviewing its consequences.
+
+### What currently differs between platforms?
+
+| Function | Fedora | Ubuntu |
+| --- | --- | --- |
+| GTK4/libadwaita dashboard | Upstream implementation | Ported; hardware testing pending |
+| Camera focus and board utilities | Upstream implementation | Hardware testing pending |
+| Screen orientation and touch | Upstream implementation | Hardware testing pending |
+| Browser kiosk | Upstream implementation | Chromium Snap behavior requires testing |
+| Permanent Chromium in-page controls | Upstream implementation | Disabled pending Snap compatibility work |
+| System-wide **Apply All** | Upstream workflow | Disabled to prevent unsafe bulk changes |
+| Automatic application removal (debloat) | Upstream workflow | Disabled pending package review |
+| Automatic Waydroid install | Upstream workflow | Disabled pending platform review |
+
+The fork also removes the original broad **passwordless sudo** setup on both
+platforms. Privileged operations may ask for authentication, and some older
+system utilities still need follow-up changes and testing.
+
+See [Ubuntu setup, caveats and validation](docs/ubuntu.md) for details.
+
+## Keeping your installation updated
+
+SUIT's built-in updater in this branch attempts a fast-forward on the **current
+checked-out branch only**. It refuses to discard local changes. Until Ubuntu
+support is merged upstream, continue using this fork's development branch.
+
+## Legacy SUIT installations
+
+The upstream project includes `uninstall_legacy.sh` for removing older
+background services, touch rules and autostart entries. **It is not executed
+automatically by this installer.** Review the script and back up your
+configuration before choosing to run it.
 
 ---
 
