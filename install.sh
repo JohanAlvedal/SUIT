@@ -7,6 +7,11 @@ source /etc/os-release
 
 case "${ID:-}" in
   ubuntu)
+    # NavigationView requires libadwaita >= 1.4 (Ubuntu 24.04 ships 1.5).
+    if ! dpkg --compare-versions "${VERSION_ID:-0}" ge "24.04"; then
+      echo "Ubuntu 24.04 or newer is required (libadwaita >= 1.4)." >&2
+      exit 1
+    fi
     DISTRO="ubuntu"
     PACKAGES=(python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
               python3-evdev python3-qrcode python3-opencv python3-numpy
