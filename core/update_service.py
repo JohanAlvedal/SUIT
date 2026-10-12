@@ -3,7 +3,6 @@ import subprocess
 import sys
 import os
 from core.logger import get_logger
-from core.package_manager import install_packages
 
 logger = get_logger("update")
 
@@ -186,14 +185,8 @@ class UpdateService:
             import cv2  # noqa: F401
             import numpy  # noqa: F401
         except ImportError:
-            try:
-                from core.privileges import check_sudo_privileges
-                if check_sudo_privileges():
-                    success, message = install_packages(["python3-opencv"])
-                    if not success:
-                        logger.warning("Could not install OpenCV: %s", message)
-            except Exception:
-                logger.exception("Failed installing python3-opencv during update")
+            # Updates must never start an unexpected privileged installation.
+            logger.warning("Missing OpenCV/NumPy; run ./install.sh manually.")
 
     @classmethod
     def restart_application(cls, project_dir: Path | None = None):
