@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 from pathlib import Path
+from core.package_manager import distribution_id
 
 # Add project root to path
 BASE_DIR = Path(__file__).resolve().parent
@@ -18,7 +19,7 @@ from gi.repository import Gtk, Adw, Gio, GLib
 
 # Set process and application name for GNOME Shell window/app tracking
 GLib.set_prgname("de.iterathor.suit.gtk")
-GLib.set_application_name("SUIT for Fedora")
+GLib.set_application_name("SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
 Gtk.Window.set_default_icon_name("de.iterathor.suit.gtk")
 
 from modules_gtk.window import SuitWindow
