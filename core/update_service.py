@@ -92,7 +92,7 @@ class UpdateService:
 
             # 4. Count of commits behind
             count_res = subprocess.run(
-                ["git", "rev-list", "--count", "HEAD..origin/main"],
+                ["git", "rev-list", "--count", f"HEAD..{remote_ref}"],
                 cwd=str(target_dir),
                 capture_output=True,
                 text=True,
