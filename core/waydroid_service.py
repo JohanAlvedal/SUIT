@@ -5,6 +5,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from core.logger import get_logger
+from core.package_manager import distribution_id
 
 logger = get_logger("waydroid")
 
@@ -121,6 +122,9 @@ class WaydroidService:
 
     @classmethod
     def install_waydroid(cls, locale: str | None = None) -> tuple[bool, str]:
+        if distribution_id() == "ubuntu":
+            return False, ("Automatic Waydroid installation is disabled on Ubuntu until "
+                           "its repository and GPU requirements are validated.")
         try:
             loc = locale or cls.get_system_locale()
             subprocess.run(["sudo", "-n", "dnf", "install", "-y", "waydroid"], check=True, capture_output=True)
