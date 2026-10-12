@@ -2,6 +2,7 @@ import subprocess
 import shutil
 import re
 from core.package_manager import distribution_id
+from core.admin import admin_prefix
 from pathlib import Path
 from core.logger import get_logger
 
@@ -139,8 +140,10 @@ class PowerService:
         target_path = config_path or DEFAULT_GDM_CONFIG
         try:
             new_content = cls.generate_gdm_config(target_path, enabled, user)
-            cmd = f"cat << 'EOF' > {target_path}\n{new_content}\nEOF"
-            subprocess.run(["sudo", "-n", "bash", "-c", cmd], check=True)
+            subprocess.run(
+                [*admin_prefix(), "tee", str(target_path)],
+                input=new_content, text=True, capture_output=True, check=True
+            )
             logger.info(f"Updated GDM auto-login to enabled={enabled} for user {user}")
             return True
         except Exception:
