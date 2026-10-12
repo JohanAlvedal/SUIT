@@ -3,6 +3,7 @@ import time
 import shutil
 from pathlib import Path
 from core.logger import get_logger
+from core.package_manager import install_packages
 
 logger = get_logger("keyring")
 
@@ -101,13 +102,10 @@ class KeyringService:
 
     @staticmethod
     def install_seahorse() -> bool:
-        try:
-            subprocess.run(["sudo", "-n", "dnf", "install", "-y", "seahorse"], check=True, capture_output=True)
-            logger.info("Installed seahorse package")
-            return True
-        except Exception:
-            logger.exception("Failed installing seahorse")
-            return False
+        success, message = install_packages(["seahorse"])
+        if not success:
+            logger.warning("Failed installing seahorse: %s", message)
+        return success
 
     @staticmethod
     def launch_seahorse() -> bool:
