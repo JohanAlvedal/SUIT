@@ -17,6 +17,9 @@ jobs:
         run: |
           bash -n install.sh
           bash install.sh --check
+      - name: Fedora installer read-only smoke test
+        run: |
+          docker run --rm -v "$PWD:/work:ro" -w /work fedora:latest bash -c './install.sh --check'
       - name: Compile Python sources (does not start SUIT)
         run: |
           python3 -m compileall -q app_gtk.py create_launcher.py core modules_gtk kiosk_extension/host
