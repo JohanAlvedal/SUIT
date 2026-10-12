@@ -3,6 +3,7 @@ import subprocess
 import sys
 import os
 from core.logger import get_logger
+from core.package_manager import install_packages
 
 logger = get_logger("update")
 
@@ -11,6 +12,16 @@ class UpdateService:
     """Service to check for GitHub updates, apply git pulls, and restart SUIT."""
 
     PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+    @staticmethod
+    def _current_branch(target_dir: Path) -> str:
+        result = subprocess.run(
+            ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+            cwd=str(target_dir), capture_output=True, text=True, timeout=5
+        )
+        if result.returncode or not result.stdout.strip():
+            raise RuntimeError("Detached HEAD: select a branch before updating SUIT.")
+        return result.stdout.strip()
 
     @classmethod
     def check_update(cls, project_dir: Path | None = None) -> dict:
@@ -28,9 +39,11 @@ class UpdateService:
             }
 
         try:
-            # 1. Fetch origin main with a short timeout
+            # Fetch the checked-out branch, never another branch of the fork.
+            branch = cls._current_branch(target_dir)
+            remote_ref = f"origin/{branch}"
             fetch_res = subprocess.run(
-                ["git", "fetch", "origin", "main"],
+                ["git", "fetch", "origin", branch],
                 cwd=str(target_dir),
                 capture_output=True,
                 text=True,
@@ -59,7 +72,7 @@ class UpdateService:
 
             # 3. Remote origin/main short commit
             remote_res = subprocess.run(
-                ["git", "rev-parse", "--short", "origin/main"],
+                ["git", "rev-parse", "--short", remote_ref],
                 cwd=str(target_dir),
                 capture_output=True,
                 text=True,
@@ -89,7 +102,7 @@ class UpdateService:
 
             # 5. Latest remote commit summary message
             msg_res = subprocess.run(
-                ["git", "log", "-1", "--pretty=format:%s", "origin/main"],
+                ["git", "log", "-1", "--pretty=format:%s", remote_ref],
                 cwd=str(target_dir),
                 capture_output=True,
                 text=True,
@@ -131,9 +144,10 @@ class UpdateService:
     def apply_update(cls, project_dir: Path | None = None) -> tuple[bool, str]:
         target_dir = project_dir or cls.PROJECT_DIR
         try:
-            # 1. Fetch latest changes from origin main
+            # Fetch only the checked-out branch. Never overwrite user changes.
+            branch = cls._current_branch(target_dir)
             fetch_res = subprocess.run(
-                ["git", "fetch", "origin", "main"],
+                ["git", "fetch", "origin", branch],
                 cwd=str(target_dir),
                 capture_output=True,
                 text=True,
@@ -143,29 +157,20 @@ class UpdateService:
                 err = fetch_res.stderr.strip() or "Network error"
                 return False, f"Failed fetching updates: {err}"
 
-            # 2. Fast-forward pull with hard reset fallback for rewritten history
+            # Fast-forward only: a divergent or locally modified checkout is
+            # left untouched and the user receives a meaningful error instead.
             pull_res = subprocess.run(
-                ["git", "pull", "--ff-only", "origin", "main"],
+                ["git", "pull", "--ff-only", "origin", branch],
                 cwd=str(target_dir),
                 capture_output=True,
                 text=True,
                 timeout=15
             )
             if pull_res.returncode != 0:
-                logger.warning("Fast-forward pull failed, attempting hard reset to origin/main: %s", pull_res.stderr.strip())
-                reset_res = subprocess.run(
-                    ["git", "reset", "--hard", "origin/main"],
-                    cwd=str(target_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=15
-                )
-                if reset_res.returncode != 0:
-                    err = reset_res.stderr.strip()
-                    logger.warning("Hard reset failed: %s", err)
-                    return False, f"Unable to update: {err}"
+                err = pull_res.stderr.strip() or "Branch cannot be fast-forwarded."
+                return False, f"Update refused without changing local files: {err}"
 
-            logger.info("Successfully updated SUIT from origin main")
+            logger.info("Successfully updated SUIT from origin/%s", branch)
             cls.ensure_dependencies()
             return True, "SUIT updated successfully."
         except subprocess.TimeoutExpired:
@@ -184,13 +189,9 @@ class UpdateService:
             try:
                 from core.privileges import check_sudo_privileges
                 if check_sudo_privileges():
-                    logger.info("Installing missing python3-opencv package via DNF")
-                    subprocess.run(
-                        ["sudo", "dnf", "install", "-y", "--setopt=install_weak_deps=False", "python3-opencv"],
-                        capture_output=True,
-                        text=True,
-                        timeout=180
-                    )
+                    success, message = install_packages(["python3-opencv"])
+                    if not success:
+                        logger.warning("Could not install OpenCV: %s", message)
             except Exception:
                 logger.exception("Failed installing python3-opencv during update")
 
