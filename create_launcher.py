@@ -4,7 +4,6 @@ import subprocess
 import sys
 import shutil
 import ast
-from core.package_manager import distribution_id
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
@@ -85,7 +84,7 @@ def create_desktop_launcher():
 
     desktop_entry = f"""[Desktop Entry]
 Version=1.0
-Name=SUIT for Ubuntu and Fedora
+Name=SUIT (Autodarts)
 Comment=Setup Utilities by IteraThor (GTK4 / Libadwaita)
 Exec=/usr/bin/python3 {PROJECT_DIR}/app_gtk.py
 Icon=de.iterathor.suit.gtk
