@@ -3,6 +3,7 @@
 from pathlib import Path
 from core.power_service import PowerService, DEFAULT_GDM_CONFIG
 from core.keyring_service import KeyringService
+from core.package_manager import distribution_id
 from core.debloat_service import DebloatService
 from core.tailscale_service import TailscaleService
 from core.waydroid_service import WaydroidService
@@ -449,6 +450,11 @@ class SystemService:
         bloatware removal, and Chromium installation. Excludes Advanced Users.
         Errors on individual steps do not abort subsequent steps.
         """
+        if distribution_id() == "ubuntu":
+            return (False,
+                    "Apply All is disabled on Ubuntu. Configure login, keyring and packages separately.",
+                    [])
+
         step_definitions = [
             ("Power Profile", "performance", "Locking CPU to maximum performance"),
             ("Display Always On", True, "Disabling screen blanking and sleep"),
@@ -505,7 +511,7 @@ class SystemService:
                         success, msg = True, "Chromium is already installed."
                     else:
                         if step_callback:
-                            step_callback(idx, total_steps, title, "Downloading and installing Chromium via DNF...")
+                            step_callback(idx, total_steps, title, "Downloading and installing Chromium via the system package manager...")
                         success, msg = cls.install_chromium()
             except Exception as e:
                 logger.exception("Error executing step %s during apply_all", title)
