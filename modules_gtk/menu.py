@@ -4,13 +4,15 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 from core.logger import get_logger
 from core.update_service import UpdateService
+from core.package_manager import distribution_id
 from modules_gtk.async_utils import run_async
 
 logger = get_logger("menu")
 
 class MainMenuView(Adw.NavigationPage):
     def __init__(self, window):
-        super().__init__(title="SUIT for Fedora", tag="main_menu")
+        self.app_title = "SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora"
+        super().__init__(title=self.app_title, tag="main_menu")
         self.window = window
         
         # Scrolled container with kinetic touch scrolling
@@ -52,7 +54,7 @@ class MainMenuView(Adw.NavigationPage):
         text_box.set_valign(Gtk.Align.CENTER)
         text_box.set_hexpand(True)
 
-        self.lbl_title = Gtk.Label(label="SUIT for Fedora", xalign=0)
+        self.lbl_title = Gtk.Label(label=self.app_title, xalign=0)
         self.lbl_title.add_css_class("title-3")
         text_box.append(self.lbl_title)
 
@@ -231,7 +233,7 @@ class MainMenuView(Adw.NavigationPage):
                 return
 
             if not info.get("has_update"):
-                self.window.show_toast("SUIT for Fedora is up to date.")
+                self.window.show_toast(f"{self.app_title} is up to date.")
                 return
 
             count = info.get("commits_behind", 1)
