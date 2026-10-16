@@ -3,7 +3,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 import subprocess
+import shutil
 from core.logger import get_logger
+from core.package_manager import distribution_id
 from core.kiosk_service import KioskService
 from core.light_service import LightService
 from core.system_service import SystemService
@@ -52,7 +54,7 @@ class KioskView(Adw.NavigationPage):
         # Autostart Toggle Switch
         self.row_autostart = Adw.SwitchRow(
             title="Autostart on Boot",
-            subtitle="Launch kiosk automatically when Fedora logs in."
+            subtitle="Launch kiosk automatically when the desktop user logs in."
         )
         self.row_autostart.connect("notify::active", self._on_autostart_toggled)
         grp_kiosk.add(self.row_autostart)
@@ -198,7 +200,12 @@ class KioskView(Adw.NavigationPage):
 
     def refresh(self):
         is_enabled = KioskService.is_autostart_enabled()
-        self.row_autostart.set_active(is_enabled)
+        # Avoid rewriting an existing autostart entry while merely refreshing the UI.
+        self._loading_autostart = True
+        try:
+            self.row_autostart.set_active(is_enabled)
+        finally:
+            self._loading_autostart = False
 
         is_ext_installed = KioskService.is_permanent_extension_installed()
         if is_ext_installed:
@@ -218,8 +225,19 @@ class KioskView(Adw.NavigationPage):
             self.btn_ext_toggle.add_css_class("suggested-action")
             self.row_ext.set_subtitle("Load shutdown, restart, and session controls on all Chromium launches.")
 
-        # Check Chromium installation status
-        has_chrom = SystemService.is_app_installed("chromium")
+        # Ubuntu's Chromium Snap cannot reliably reach the native messaging host.
+        # Keep browser kiosk and local WLED test controls available, but don't
+        # present the broken in-page power/session shortcuts as functional.
+        if not KioskService.supports_inpage_controls():
+            self.lbl_ext_status.set_label("Unavailable on Ubuntu")
+            self.row_ext.set_subtitle(
+                "In-page shortcuts require a compatible native-messaging browser; "
+                "Ubuntu kiosk currently runs without them."
+            )
+            self.btn_ext_toggle.set_sensitive(False)
+
+        # Chrome or Brave may be used instead of Chromium.
+        has_chrom = bool(shutil.which(KioskService.resolve_browser()))
         if not has_chrom:
             self.box_chromium_lock.set_visible(True)
             self.grp_ext.set_sensitive(False)
@@ -343,6 +361,9 @@ class KioskView(Adw.NavigationPage):
         run_async(worker, on_done=on_done)
 
     def _on_ext_toggle_clicked(self, btn):
+        if not KioskService.supports_inpage_controls():
+            self.window.show_toast("In-page controls are not yet supported on Ubuntu.")
+            return
         btn.set_sensitive(False)
         is_installed = KioskService.is_permanent_extension_installed()
 
@@ -364,22 +385,35 @@ class KioskView(Adw.NavigationPage):
         return KioskService.resolve_browser()
 
     def _on_autostart_toggled(self, row, param):
+        if getattr(self, "_loading_autostart", False):
+            return
         active = row.get_active()
         url = self.row_url.get_text().strip() or "https://play.autodarts.com/"
         browser = self._get_browser_binary()
-        KioskService.set_autostart(active, url=url, browser=browser, enable_controls=True)
-        msg = "Kiosk autostart enabled." if active else "Kiosk autostart disabled."
+        ok = KioskService.set_autostart(active, url=url, browser=browser, enable_controls=True)
+        if ok:
+            msg = "Kiosk autostart enabled." if active else "Kiosk autostart disabled."
+        else:
+            msg = "Could not save kiosk autostart; check suit.log."
         self.window.show_toast(msg)
 
     def _launch_kiosk(self, btn):
         url = self.row_url.get_text().strip() or "https://play.autodarts.com/"
         browser = self._get_browser_binary()
-        KioskService.ensure_native_messaging_host()
-        KioskService.clean_stale_singleton_locks()
+        if not shutil.which(browser):
+            self.window.show_toast(f"Browser not found: {browser}. Install Chromium or Chrome.")
+            return
 
-        launcher = KioskService.ensure_launcher_script()
-        flags = KioskService.get_kiosk_flags(enable_controls=True)
-        cmd = f"{launcher} {browser} {' '.join(flags)} '{url}'"
-        logger.info(f"Launching Kiosk: {cmd}")
-        subprocess.Popen(cmd, shell=True)
-        self.window.show_toast("Kiosk session launched.")
+        try:
+            if KioskService.supports_inpage_controls():
+                KioskService.ensure_native_messaging_host()
+            launcher = KioskService.ensure_launcher_script()
+            flags = KioskService.get_kiosk_flags(enable_controls=True)
+            command = [str(launcher), browser, *flags, url]
+            logger.info("Launching Kiosk: %r", command)
+            # Pass arguments directly: URLs must never be interpreted as shell commands.
+            subprocess.Popen(command, start_new_session=True)
+            self.window.show_toast("Kiosk launch requested; check the browser window.")
+        except OSError as exc:
+            logger.exception("Unable to launch kiosk")
+            self.window.show_toast(f"Unable to launch kiosk: {exc}")
