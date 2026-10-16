@@ -11,8 +11,9 @@ logger = get_logger("menu")
 
 class MainMenuView(Adw.NavigationPage):
     def __init__(self, window):
-        self.app_title = "SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora"
-        super().__init__(title=self.app_title, tag="main_menu")
+        title = "SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora"
+        super().__init__(title=title, tag="main_menu")
+        self.app_title = title
         self.window = window
         
         # Scrolled container with kinetic touch scrolling
