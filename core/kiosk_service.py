@@ -274,6 +274,11 @@ class KioskService:
             return False
 
     @classmethod
+    def supports_inpage_controls(cls) -> bool:
+        """Native-messaging shortcuts are not yet verified with Ubuntu's Chromium Snap."""
+        return distribution_id() != "ubuntu"
+
+    @classmethod
     def get_kiosk_flags(cls, enable_controls: bool = True) -> list[str]:
         flags = [
             "--ozone-platform=wayland",
@@ -283,7 +288,7 @@ class KioskService:
             "--disable-infobars",
             "--check-for-update-interval=31536000"
         ]
-        if enable_controls:
+        if enable_controls and cls.supports_inpage_controls():
             ext_dir = cls.INSTALLED_EXTENSION_DIR if cls.INSTALLED_EXTENSION_DIR.exists() else cls.EXTENSION_DIR
             if ext_dir.exists():
                 flags.append(f"--load-extension={ext_dir.resolve()}")
@@ -370,7 +375,7 @@ X-GNOME-Autostart-enabled=true
                 logger.info(f"Removed kiosk autostart file: {target_file}")
                 return True
 
-            if enable_controls:
+            if enable_controls and cls.supports_inpage_controls():
                 cls.ensure_native_messaging_host()
 
             target_file.parent.mkdir(parents=True, exist_ok=True)
