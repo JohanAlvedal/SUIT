@@ -4,6 +4,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 import subprocess
 from core.system_service import SystemService
+from core.package_manager import distribution_id
 from modules_gtk.async_utils import run_async
 from modules_gtk.ui_helpers import create_button_with_icon, copy_to_clipboard
 from modules_gtk.dialogs.tailscale_dialog import TailscaleAuthDialog
@@ -80,6 +81,9 @@ class AdvancedUsersView(Adw.NavigationPage):
 
         self.row_rdp_info.add_suffix(self.box_rdp_actions)
         self.grp_remote.add(self.row_rdp_info)
+        # Fedora's GNOME RDP integration is not supported on Ubuntu yet.
+        # Don't display controls which cannot function after removing RDP.
+        self.grp_remote.set_visible(distribution_id() != "ubuntu")
 
         # =========================================================================
         # Group 2: Remote Access (Tailscale VPN)
@@ -202,7 +206,8 @@ class AdvancedUsersView(Adw.NavigationPage):
 
             self._updating_rdp = False
 
-        run_async(worker_rdp, on_done=on_done_rdp)
+        if distribution_id() != "ubuntu":
+            run_async(worker_rdp, on_done=on_done_rdp)
 
         # 2. Tailscale Status Refresh
         def worker_tailscale():
