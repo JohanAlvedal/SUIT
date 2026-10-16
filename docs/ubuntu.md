@@ -28,8 +28,15 @@ passwordless sudo. No root account or global Python pip installation is needed.
 - Development is tested statically; **not yet verified on a physical Ubuntu NUC**.
 - Autodarts must be installed and configured separately. Do not reinstall or
   remove a working Autodarts service just to test this GUI.
-- Chromium on Ubuntu is packaged as a **Snap**. Kiosk mode and the SUIT
-  native-messaging extension must be validated on the actual computer.
+- Chromium on Ubuntu is usually packaged as a **Snap**. Kiosk fullscreen
+  launch remains available, but SUIT's in-page session/power shortcuts are
+  currently disabled on Ubuntu: the extension's Native Messaging host is not
+  reliably accessible through the Snap sandbox. Do not claim these shortcuts
+  work until a browser-specific integration has been tested.
+- Ubuntu skips background camera-page prewarming at startup to reduce the risk
+  of freezing the GTK interface. Camera pages still need physical testing.
+- Fedora-specific GNOME RDP controls are hidden on Ubuntu. Use a separately
+  configured remote-control solution rather than re-enabling GNOME RDP through SUIT.
 - The original one-click **Apply All** workflow is disabled on Ubuntu. It
   silently changes login and keyring security, removes default applications and
   adjusts performance settings. Configure these deliberately and separately.
