@@ -104,8 +104,11 @@ class SuitWindow(Adw.ApplicationWindow):
 
         # Never ask for blanket passwordless administrator access on startup.
 
-        # Background pre-warm heavy dependencies (OpenCV, GStreamer, CameraFocusView)
-        self._start_background_prewarm()
+        # Ubuntu hardware may stall while heavy OpenCV imports and a complete
+        # camera page are built during startup. Load the page only on demand
+        # until the Ubuntu-specific performance path has been measured.
+        if distribution_id() != "ubuntu":
+            self._start_background_prewarm()
 
         # Handle window close request to cleanly tear down active page & services
         self.connect("close-request", self._on_close_request)
