@@ -19,7 +19,8 @@ from gi.repository import Gtk, Adw, Gio, GLib
 
 # Set process and application name for GNOME Shell window/app tracking
 GLib.set_prgname("de.iterathor.suit.gtk")
-GLib.set_application_name("SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
+APP_TITLE = "SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora"
+GLib.set_application_name(APP_TITLE)
 Gtk.Window.set_default_icon_name("de.iterathor.suit.gtk")
 
 from modules_gtk.window import SuitWindow
@@ -33,7 +34,7 @@ class SuitGtkApplication(Adw.Application):
         self.window = None
 
     def do_activate(self):
-        logger.info("Activating SUIT for Fedora GTK4 Application")
+        logger.info("Activating %s GTK4 Application", APP_TITLE)
         # Force/Prefer Dark Mode (matching GNOME native dark palette)
         style_mgr = Adw.StyleManager.get_default()
         style_mgr.set_color_scheme(Adw.ColorScheme.PREFER_DARK)
@@ -43,7 +44,7 @@ class SuitGtkApplication(Adw.Application):
         self.window.present()
 
     def do_shutdown(self):
-        logger.info("Shutting down SUIT for Fedora GTK4 Application")
+        logger.info("Shutting down %s GTK4 Application", APP_TITLE)
         try:
             from core.systemd_service import SystemdManager
             SystemdManager.ensure_autodarts_restored_on_exit()
