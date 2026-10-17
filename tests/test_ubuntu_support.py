@@ -9,6 +9,7 @@ from core import package_manager
 from core.debloat_service import DebloatService
 from core.privileges import setup_sudoers_pkexec
 from core.update_service import UpdateService
+import create_launcher
 from core.kiosk_service import KioskService
 
 
@@ -43,6 +44,19 @@ class UbuntuSupportTests(unittest.TestCase):
         ok, detail = DebloatService.debloat_packages(["firefox"])
         self.assertFalse(ok)
         self.assertIn("disabled", detail)
+
+    def test_desktop_launcher_uses_ubuntu_or_fedora_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch("create_launcher.Path.home", return_value=Path(td)), \
+                 patch("create_launcher.install_hicolor_icons"), \
+                 patch("create_launcher.get_desktop_path", return_value=Path(td)), \
+                 patch("create_launcher.pin_to_dash"), \
+                 patch("create_launcher.subprocess.run"):
+                for distro, expected in (("ubuntu", "SUIT for Ubuntu"), ("fedora", "SUIT for Fedora")):
+                    with patch("create_launcher.distribution_id", return_value=distro):
+                        create_launcher.create_desktop_launcher()
+                    launcher = Path(td) / ".local/share/applications/de.iterathor.suit.gtk.desktop"
+                    self.assertIn("Name=" + expected + "\\n", launcher.read_text())
 
     @patch("core.kiosk_service.distribution_id", return_value="ubuntu")
     def test_ubuntu_kiosk_omits_unverified_native_extension(self, distro):
