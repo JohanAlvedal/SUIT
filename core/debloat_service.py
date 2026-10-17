@@ -59,6 +59,10 @@ class DebloatService:
 
         target_keys = cls.BLOATWARE_PACKAGES if (include_all or not installed_full) else [k for k in cls.BLOATWARE_PACKAGES if k in installed_bases]
 
+        # Do not offer Fedora Media Writer as an Ubuntu system utility.
+        if distribution_id() == "ubuntu":
+            target_keys = [key for key in target_keys if key != "mediawriter"]
+
         details = []
         for key in target_keys:
             info = cls.APP_FRIENDLY_NAMES.get(key)
