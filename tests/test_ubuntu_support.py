@@ -56,7 +56,7 @@ class UbuntuSupportTests(unittest.TestCase):
                     with patch("create_launcher.distribution_id", return_value=distro):
                         create_launcher.create_desktop_launcher()
                     launcher = Path(td) / ".local/share/applications/de.iterathor.suit.gtk.desktop"
-                    self.assertIn("Name=" + expected + "\\n", launcher.read_text())
+                    self.assertIn(f"Name={expected}", launcher.read_text())
 
     @patch("core.kiosk_service.distribution_id", return_value="ubuntu")
     def test_ubuntu_kiosk_omits_unverified_native_extension(self, distro):
