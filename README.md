@@ -74,6 +74,13 @@ SUIT's built-in updater in this branch attempts a fast-forward on the **current
 checked-out branch only**. It refuses to discard local changes. Until Ubuntu
 support is merged upstream, continue using this fork's development branch.
 
+## Optional uninstall tool (from upstream)
+
+The repository now includes `./uninstall.sh` for deliberate, manual removal.
+Do **not** run it as part of upgrading or testing Ubuntu support: it can remove
+background services and launchers. Review its changes and back up configuration
+before using it. The `--purge` mode also deletes saved settings.
+
 ## Legacy SUIT installations
 
 The upstream project includes `uninstall_legacy.sh` for removing older

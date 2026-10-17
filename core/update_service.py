@@ -171,12 +171,90 @@ class UpdateService:
 
             logger.info("Successfully updated SUIT from origin/%s", branch)
             cls.ensure_dependencies()
+            # Preserve upstream service self-healing on Fedora, without silently
+            # mutating an existing Ubuntu Autodarts/touch configuration.
+            from core.package_manager import distribution_id
+            if distribution_id() == "fedora":
+                cls.ensure_autodarts_service()
+                cls.ensure_camera_boot_service()
+                cls.ensure_display_autostart()
             return True, "SUIT updated successfully."
         except subprocess.TimeoutExpired:
             return False, "Update timed out. Please check internet connection."
         except Exception as e:
             logger.exception("Update execution failed")
             return False, f"Update failed: {str(e)}"
+
+    @classmethod
+    def ensure_camera_boot_service(cls) -> None:
+        """Heal camera boot service unit to resolve any systemd ordering cycles."""
+        try:
+            from core.camera_manual_service import CameraManualService
+            CameraManualService.heal_boot_service_if_needed()
+        except Exception as e:
+            logger.warning("Post-update camera boot service check notice: %s", e)
+
+    @classmethod
+    def ensure_display_autostart(cls) -> None:
+        """Ensure rotation and touch autostart is up-to-date with current repository path."""
+        try:
+            from core.display_service import DisplayService
+            DisplayService.ensure_autostart()
+        except Exception as e:
+            logger.warning("Post-update display autostart check notice: %s", e)
+
+    @classmethod
+    def ensure_autodarts_service(cls) -> None:
+        """Ensure Autodarts systemd service is provisioned and enabled if Autodarts is installed."""
+        try:
+            from core.autodarts_service import (
+                is_autodarts_installed,
+                is_service_enabled,
+                set_service_enabled,
+                ensure_service_unit
+            )
+            if is_autodarts_installed():
+                ensure_service_unit()
+                if not is_service_enabled():
+                    logger.info("Post-update: enabling autodarts.service for boot startup")
+                    set_service_enabled(True)
+        except Exception as e:
+            logger.warning("Post-update autodarts service check notice: %s", e)
+
+    @classmethod
+    def check_requirements(cls) -> list[str]:
+        """Return missing distro-neutral SUIT package requirements (apt or dnf)."""
+        import importlib.util
+        import shutil
+
+        missing = []
+        if not shutil.which("v4l2-ctl"):
+            missing.append("v4l-utils")
+        for module, package in [
+            ("cv2", "python3-opencv"),
+            ("evdev", "python3-evdev"),
+            ("qrcode", "python3-qrcode"),
+        ]:
+            try:
+                if importlib.util.find_spec(module) is None:
+                    missing.append(package)
+            except (ImportError, ValueError):
+                missing.append(package)
+        if not shutil.which("git"):
+            missing.append("git")
+        return missing
+
+    @classmethod
+    def install_requirements(cls, packages: list[str] | None = None) -> tuple[bool, str]:
+        """Install explicitly approved requirements via apt or dnf with Polkit."""
+        from core.package_manager import install_packages
+        required = packages if packages is not None else cls.check_requirements()
+        if not required:
+            return True, "All requirements are already installed."
+        allowed = {"v4l-utils", "python3-opencv", "python3-evdev", "python3-qrcode", "git"}
+        if not set(required).issubset(allowed):
+            return False, "Refusing unknown package requirements."
+        return install_packages(required)
 
     @classmethod
     def ensure_dependencies(cls) -> None:

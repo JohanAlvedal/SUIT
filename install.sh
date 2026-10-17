@@ -15,12 +15,12 @@ case "${ID:-}" in
     DISTRO="ubuntu"
     PACKAGES=(python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
               python3-evdev python3-qrcode python3-opencv python3-numpy
-              git xdg-user-dirs)
+              v4l-utils git xdg-user-dirs)
     ;;
   fedora)
     DISTRO="fedora"
     PACKAGES=(python3 python3-gobject libadwaita python3-evdev
-              python3-qrcode python3-opencv git)
+              python3-qrcode python3-opencv v4l-utils git)
     ;;
   *)
     echo "Unsupported distribution: ${PRETTY_NAME:-unknown}." >&2
@@ -50,5 +50,11 @@ else
 fi
 
 python3 "$ROOT/create_launcher.py"
+
+# Keep Fedora's existing touchscreen/display boot configuration in sync after
+# an explicit install; do not alter Ubuntu login/display autostarts automatically.
+if [[ "$DISTRO" == "fedora" && -f "$HOME/.suit_rotation_config.json" ]]; then
+  python3 -c "import sys; sys.path.insert(0, '$ROOT'); from core.display_service import DisplayService; DisplayService.ensure_autostart()" 2>/dev/null || true
+fi
 echo "SUIT installed. Start it from the Applications menu."
 echo "Some advanced Fedora-specific controls remain unavailable on Ubuntu."
