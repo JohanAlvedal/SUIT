@@ -4,6 +4,7 @@ import subprocess
 import sys
 import shutil
 import ast
+from core.package_manager import distribution_id
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
@@ -82,10 +83,12 @@ def create_desktop_launcher():
     """Generate desktop and application menu entries for SUIT GTK4."""
     install_hicolor_icons()
 
+    distro = distribution_id()
+    app_name = "SUIT for Ubuntu" if distro == "ubuntu" else "SUIT for Fedora" if distro == "fedora" else "SUIT for Autodarts"
     desktop_entry = f"""[Desktop Entry]
 Version=1.0
-Name=SUIT (Autodarts)
-Comment=Setup Utilities by IteraThor (GTK4 / Libadwaita)
+Name={app_name}
+Comment=Setup Utilities by IteraThor for Autodarts (GTK4 / Libadwaita)
 Exec=/usr/bin/python3 {PROJECT_DIR}/app_gtk.py
 Icon=de.iterathor.suit.gtk
 Path={PROJECT_DIR}
