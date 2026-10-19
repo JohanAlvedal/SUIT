@@ -409,6 +409,32 @@ class AutodartsView(Adw.NavigationPage):
         run_async(worker, on_done=on_done)
 
     def _on_uninstall_clicked(self, btn):
+        """Uninstall is destructive: always ask, Cancel is the default response."""
+        if self.is_busy:
+            return
+        dialog = Adw.AlertDialog(
+            heading="Uninstall Autodarts?",
+            body=(
+                "This stops detection and removes the Autodarts program and service.\n\n"
+                "Your board ID, API key and camera settings are first backed up to "
+                "~/.local/share/suit/backup and are restored automatically if you "
+                "install Autodarts again."
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("uninstall", "Uninstall")
+        dialog.set_response_appearance("uninstall", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def on_response(_d, response):
+            if response == "uninstall":
+                self._run_uninstall()
+
+        dialog.connect("response", on_response)
+        dialog.present(self.window)
+
+    def _run_uninstall(self):
         if self.is_busy:
             return
         self.is_busy = True

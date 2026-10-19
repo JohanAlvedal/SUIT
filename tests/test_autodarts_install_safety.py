@@ -151,3 +151,75 @@ class GracefulStopTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UninstallSafetyTests(unittest.TestCase):
+    def _fake_home(self, td):
+        home = Path(td)
+        cfg = home / ".config" / "autodarts"
+        cfg.mkdir(parents=True)
+        (cfg / "config.toml").write_text('[auth]\nboard_id = "B1"\napi_key = "K1"\n')
+        bin_dir = home / ".local" / "share" / "autodarts"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "autodarts").write_text("bin")
+        return home
+
+    def _no_system(self):
+        return {"system_units": [], "system_active": False, "user_unit": False, "binary": ""}
+
+    def test_backs_up_config_before_removing_and_reinstall_restores_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = self._fake_home(td)
+            with patch.object(ads, "detect_existing_installation", return_value=self._no_system()), \
+                 patch.object(ads, "_stop_running_autodarts"), \
+                 patch.object(ads.subprocess, "run", return_value=_done()):
+                ok, msg = ads.uninstall_autodarts(home=home)
+            self.assertTrue(ok, msg)
+            self.assertFalse((home / ".config" / "autodarts").exists())
+            self.assertFalse((home / ".local" / "share" / "autodarts").exists())
+            backup = ads.latest_config_backup(home)
+            self.assertIn("B1", (backup / "config.toml").read_text())
+
+            self.assertTrue(ads.restore_config_from_backup(home))
+            self.assertIn("K1", (home / ".config" / "autodarts" / "config.toml").read_text())
+
+    def test_restore_never_overwrites_existing_config(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = self._fake_home(td)
+            ads.backup_autodarts_config(home)
+            (home / ".config" / "autodarts" / "config.toml").write_text("new")
+            self.assertFalse(ads.restore_config_from_backup(home))
+            self.assertEqual((home / ".config" / "autodarts" / "config.toml").read_text(), "new")
+
+    def test_failed_backup_removes_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = self._fake_home(td)
+            with patch.object(ads, "backup_autodarts_config", side_effect=OSError("disk full")), \
+                 patch.object(ads.subprocess, "run") as run:
+                ok, msg = ads.uninstall_autodarts(home=home)
+            self.assertFalse(ok)
+            self.assertIn("nothing was removed", msg)
+            self.assertTrue((home / ".config" / "autodarts" / "config.toml").exists())
+            run.assert_not_called()
+
+    def test_refused_system_removal_keeps_user_files(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = self._fake_home(td)
+            sys_info = {"system_units": ["/etc/systemd/system/autodarts.service"],
+                        "system_active": True, "user_unit": False, "binary": ""}
+            with patch.object(ads, "detect_existing_installation", return_value=sys_info), \
+                 patch.object(ads, "_remove_legacy_system_service", return_value=(False, "refused")):
+                ok, msg = ads.uninstall_autodarts(home=home)
+            self.assertFalse(ok)
+            self.assertTrue((home / ".local" / "share" / "autodarts" / "autodarts").exists())
+
+    def test_never_touches_system_bin_or_kills_by_pattern(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = self._fake_home(td)
+            paths = [str(p) for p in ads._user_install_paths(home)]
+            self.assertNotIn("/usr/bin/autodarts", paths)
+            self.assertTrue(all(p.startswith(str(home)) or p == "/usr/local/bin/autodarts" for p in paths))
+        import inspect
+        src = inspect.getsource(ads.uninstall_autodarts)
+        self.assertNotIn("pkill -9", src)
+        self.assertNotIn("shell=True", src)

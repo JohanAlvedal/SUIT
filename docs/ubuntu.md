@@ -34,6 +34,11 @@ passwordless sudo. No root account or global Python pip installation is needed.
   authorization and aborts without further changes if that is refused. The
   installer is downloaded over HTTPS to a temporary file before it runs
   (override with `SUIT_AUTODARTS_INSTALLER_URL`).
+- **Uninstall Autodarts** always asks first (Cancel is the default). It backs up
+  `~/.config/autodarts` (board ID, API key, camera settings) to
+  `~/.local/share/suit/backup/autodarts-config-<timestamp>/` before removing
+  anything, aborts if the backup fails, only removes files in your home folder,
+  and a later **Install** restores that configuration automatically.
 - Chromium on Ubuntu is usually packaged as a **Snap**. Kiosk fullscreen
   launch remains available, but SUIT's in-page session/power shortcuts are
   currently disabled on Ubuntu: the extension's Native Messaging host is not

@@ -1095,6 +1095,8 @@ def install_autodarts(replace_system_service: bool = False) -> tuple[bool, str]:
         )
 
     # 2. Preserve existing credentials and camera settings
+    # (after an uninstall via SUIT, bring back the backed-up config first)
+    restore_config_from_backup()
     preserved_bid, preserved_key = read_stored_auth()
     preserved_cam = read_cam_config()
 
@@ -1205,29 +1207,116 @@ def install_autodarts(replace_system_service: bool = False) -> tuple[bool, str]:
     return True, "Autodarts v2 installation completed and service started."
 
 
-def uninstall_autodarts() -> tuple[bool, str]:
-    """Stop, disable service, remove systemd unit and local config/binaries."""
-    home = str(Path.home())
-    cmd = (
-        "systemctl --user stop autodarts.service 2>/dev/null || true; "
-        "systemctl --user disable autodarts.service 2>/dev/null || true; "
-        f"rm -f {home}/.config/systemd/user/autodarts.service "
-        f"{home}/.config/systemd/user/default.target.wants/autodarts.service; "
-        "systemctl --user daemon-reload 2>/dev/null || true; "
-        "sudo -n systemctl stop autodarts 2>/dev/null || true; "
-        "sudo -n systemctl disable autodarts 2>/dev/null || true; "
-        "sudo -n rm -f /etc/systemd/system/autodarts.service /etc/systemd/system/autodartsupdater.service; "
-        "sudo -n systemctl daemon-reload 2>/dev/null || true; "
-        f"rm -rf {home}/.local/share/autodarts {home}/.local/opt/autodarts "
-        f"{home}/.local/bin/autodarts {home}/.local/bin/ad {home}/.config/autodarts "
-        f"{home}/.local/state/autodarts "
-        f"/usr/local/bin/autodarts /usr/bin/autodarts; "
-        "pkill -9 -f autodarts 2>/dev/null || true"
+def backup_autodarts_config(home: Path | None = None, backup_root: Path | None = None) -> Path | None:
+    """Copy ~/.config/autodarts (board ID, API key, camera config) to a timestamped backup.
+
+    Returns the backup directory, or None if there was nothing to back up.
+    Raises OSError if the copy fails, so callers can abort before deleting anything.
+    """
+    base = home or Path.home()
+    src = base / ".config" / "autodarts"
+    if not src.is_dir() or not any(src.iterdir()):
+        return None
+    root = backup_root or (base / ".local" / "share" / "suit" / "backup")
+    target = root / f"autodarts-config-{time.strftime('%Y%m%d-%H%M%S')}"
+    shutil.copytree(src, target, symlinks=True)
+    os.chmod(target, 0o700)  # contains the board API key
+    logger.info("Backed up Autodarts configuration to %s", target)
+    return target
+
+
+def latest_config_backup(home: Path | None = None, backup_root: Path | None = None) -> Path | None:
+    base = home or Path.home()
+    root = backup_root or (base / ".local" / "share" / "suit" / "backup")
+    if not root.is_dir():
+        return None
+    candidates = sorted(
+        (d for d in root.glob("autodarts-config-*") if (d / "config.toml").is_file()),
+        key=lambda d: d.name,
     )
+    return candidates[-1] if candidates else None
+
+
+def restore_config_from_backup(home: Path | None = None, backup_root: Path | None = None) -> bool:
+    """Restore config.toml from the newest SUIT backup if no current config exists."""
+    base = home or Path.home()
+    config = base / ".config" / "autodarts" / "config.toml"
+    if config.is_file():
+        return False
+    backup = latest_config_backup(base, backup_root)
+    if not backup:
+        return False
+    config.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(backup / "config.toml", config)
+    os.chmod(config, 0o600)
+    logger.info("Restored Autodarts configuration from %s", backup)
+    return True
+
+
+def _user_install_paths(home: Path) -> list[Path]:
+    """User-owned Autodarts files. Nothing outside $HOME except /usr/local/bin (only if writable)."""
+    paths = [
+        home / ".config" / "systemd" / "user" / "autodarts.service",
+        home / ".config" / "systemd" / "user" / "default.target.wants" / "autodarts.service",
+        home / ".local" / "share" / "autodarts",
+        home / ".local" / "opt" / "autodarts",
+        home / ".local" / "bin" / "autodarts",
+        home / ".local" / "bin" / "ad",
+        home / ".local" / "state" / "autodarts",
+        home / ".config" / "autodarts",
+    ]
+    local_bin = Path("/usr/local/bin/autodarts")
+    if local_bin.exists() and os.access(local_bin.parent, os.W_OK):
+        paths.append(local_bin)
+    return paths
+
+
+def uninstall_autodarts(home: Path | None = None) -> tuple[bool, str]:
+    """Remove Autodarts, keeping a backup of its configuration.
+
+    Order matters: the configuration is backed up first and the uninstall is
+    aborted if that fails. A legacy system service is removed with one Polkit
+    prompt; if that is refused, user files are left untouched as well.
+    """
+    base = home or Path.home()
+
+    # 1. Back up board ID, API key and camera settings. Abort if this fails.
     try:
-        subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
-        logger.info("Autodarts uninstallation completed")
-        return True, "Autodarts has been uninstalled."
-    except Exception as e:
-        logger.exception("Failed uninstalling Autodarts")
-        return False, str(e)
+        backup = backup_autodarts_config(base)
+    except OSError as exc:
+        return False, f"Could not back up Autodarts configuration, nothing was removed: {exc}"
+
+    # 2. Legacy v1 system service (only if present).
+    existing = detect_existing_installation()
+    if existing["system_units"]:
+        ok, msg = _remove_legacy_system_service(existing["system_units"])
+        if not ok:
+            return False, f"{msg} Nothing else was removed."
+
+    # 3. Stop and disable the user service, then stray processes (SIGTERM first).
+    errors: list[str] = []
+    try:
+        subprocess.run(["systemctl", "--user", "disable", "--now", "autodarts.service"],
+                       capture_output=True, timeout=20)
+        _stop_running_autodarts()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        errors.append(f"stopping service: {exc}")
+
+    # 4. Remove user-owned files.
+    for path in _user_install_paths(base):
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+        except OSError as exc:
+            errors.append(f"{path}: {exc}")
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, timeout=10)
+
+    if errors:
+        logger.warning("Autodarts uninstall incomplete: %s", errors)
+        return False, "Uninstall incomplete: " + "; ".join(errors)
+    logger.info("Autodarts uninstalled (config backup: %s)", backup)
+    if backup:
+        return True, f"Autodarts removed. Settings backed up to {backup} and restored on reinstall."
+    return True, "Autodarts removed."
