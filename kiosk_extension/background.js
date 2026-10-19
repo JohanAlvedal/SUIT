@@ -34,7 +34,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 2. Handle System Operations via Native Messaging
+  // 2. System operations. Ubuntu/Chromium Snap: localhost bridge (native
+  // messaging is sandboxed there). Fedora: native messaging as before.
+  getBridgeConfig().then((bridge) => {
+    if (bridge) {
+      callBridge(bridge, request).then(sendResponse);
+    } else {
+      callNativeHost(request, sendResponse);
+    }
+  });
+  return true; // Required to keep sendResponse valid asynchronously
+});
+
+// bridge_config.json is written by SUIT next to the extension files only in
+// bridge mode. It is not web-accessible, so pages cannot read the token.
+let bridgeConfigPromise = null;
+function getBridgeConfig() {
+  if (!bridgeConfigPromise) {
+    bridgeConfigPromise = fetch(chrome.runtime.getURL("bridge_config.json"))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => (cfg && cfg.url && cfg.token ? cfg : null))
+      .catch(() => null);
+  }
+  return bridgeConfigPromise;
+}
+
+async function callBridge(bridge, request) {
+  try {
+    const resp = await fetch(bridge.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-SUIT-Token": bridge.token },
+      body: JSON.stringify({ action: request.action }),
+    });
+    const data = await resp.json().catch(() => null);
+    return data || { status: "error", error: `Bridge HTTP ${resp.status}` };
+  } catch (err) {
+    return { status: "error", error: "SUIT kiosk bridge not running" };
+  }
+}
+
+function callNativeHost(request, sendResponse) {
   try {
     chrome.runtime.sendNativeMessage(
       "com.suit.kiosk",
@@ -55,6 +94,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.error("Failed sending native message:", err);
     sendResponse({ status: "error", error: String(err) });
   }
-
-  return true; // Required to keep sendResponse valid asynchronously
-});
+}

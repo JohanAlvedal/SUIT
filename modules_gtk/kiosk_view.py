@@ -225,14 +225,13 @@ class KioskView(Adw.NavigationPage):
             self.btn_ext_toggle.add_css_class("suggested-action")
             self.row_ext.set_subtitle("Load shutdown, restart, and session controls on all Chromium launches.")
 
-        # Ubuntu's Chromium Snap cannot reliably reach the native messaging host.
-        # Keep browser kiosk and local WLED test controls available, but don't
-        # present the broken in-page power/session shortcuts as functional.
-        if not KioskService.supports_inpage_controls():
-            self.lbl_ext_status.set_label("Unavailable on Ubuntu")
+        # Ubuntu: in-page controls are loaded by the kiosk itself (localhost
+        # bridge); installing them into every Chromium launch is Fedora-only.
+        if not KioskService.supports_permanent_extension():
+            self.lbl_ext_status.set_label("Kiosk only")
             self.row_ext.set_subtitle(
-                "In-page shortcuts require a compatible native-messaging browser; "
-                "Ubuntu kiosk currently runs without them."
+                "Shutdown, restart and light controls are available inside the kiosk. "
+                "Adding them to normal Chromium windows is not supported on Ubuntu."
             )
             self.btn_ext_toggle.set_sensitive(False)
 
@@ -361,8 +360,8 @@ class KioskView(Adw.NavigationPage):
         run_async(worker, on_done=on_done)
 
     def _on_ext_toggle_clicked(self, btn):
-        if not KioskService.supports_inpage_controls():
-            self.window.show_toast("In-page controls are not yet supported on Ubuntu.")
+        if not KioskService.supports_permanent_extension():
+            self.window.show_toast("On Ubuntu the controls are available inside the kiosk only.")
             return
         btn.set_sensitive(False)
         is_installed = KioskService.is_permanent_extension_installed()
@@ -405,10 +404,10 @@ class KioskView(Adw.NavigationPage):
             return
 
         try:
-            if KioskService.supports_inpage_controls():
+            if not KioskService.uses_bridge(browser):
                 KioskService.ensure_native_messaging_host()
             launcher = KioskService.ensure_launcher_script()
-            flags = KioskService.get_kiosk_flags(enable_controls=True)
+            flags = KioskService.get_kiosk_flags(enable_controls=True, browser=browser)
             command = [str(launcher), browser, *flags, url]
             logger.info("Launching Kiosk: %r", command)
             # Pass arguments directly: URLs must never be interpreted as shell commands.

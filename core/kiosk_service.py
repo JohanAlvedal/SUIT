@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,6 +17,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXTENSION_DIR = PROJECT_ROOT / "kiosk_extension"
 HOST_SCRIPT = EXTENSION_DIR / "host" / "suit_kiosk_host.py"
 
+# Browser profile roots. Ubuntu's Chromium is a Snap whose profile lives under
+# ~/snap/chromium/common/chromium instead of ~/.config/chromium.
+SNAP_CHROMIUM_COMMON = Path.home() / "snap" / "chromium" / "common"
+BROWSER_PROFILE_DIRS = [
+    Path.home() / ".config" / "chromium",
+    SNAP_CHROMIUM_COMMON / "chromium",
+    Path.home() / ".config" / "google-chrome",
+    Path.home() / ".config" / "BraveSoftware" / "Brave-Browser",
+]
+
 NATIVE_MESSAGING_DIRS = [
     Path.home() / ".config" / "chromium" / "NativeMessagingHosts",
     Path.home() / ".config" / "google-chrome" / "NativeMessagingHosts",
@@ -29,6 +40,11 @@ class KioskService:
     HOST_SCRIPT = HOST_SCRIPT
 
     INSTALLED_EXTENSION_DIR = Path.home() / ".local" / "share" / "suit" / "kiosk_extension"
+    # Copies used with the localhost bridge (Ubuntu). The Snap's `home`
+    # interface cannot read hidden folders such as ~/.local, so for Chromium
+    # Snap the extension must live in the Snap's own user-common directory.
+    SNAP_BRIDGE_EXTENSION_DIR = SNAP_CHROMIUM_COMMON / "suit-kiosk-extension"
+    BRIDGE_EXTENSION_DIR = Path.home() / ".local" / "share" / "suit" / "kiosk_extension_bridge"
     CHROMIUM_CONF_PATH = Path("/etc/chromium/chromium.conf")
     SYSTEM_NATIVE_MESSAGING_DIR = Path("/etc/chromium/native-messaging-hosts")
     USER_DESKTOP_DIR = Path.home() / ".local" / "share" / "applications"
@@ -90,7 +106,7 @@ class KioskService:
         """
         conf_file = chromium_conf or cls.CHROMIUM_CONF_PATH
         desk_file = desktop_path or cls.USER_DESKTOP_PATH
-        if distribution_id() == "ubuntu":
+        if not cls.supports_permanent_extension():
             return (False, "Permanent Chromium extension installation is not validated "
                            "with Ubuntu's sandboxed Chromium Snap. Use kiosk without "
                            "permanent controls or a separate browser extension.")
@@ -275,21 +291,72 @@ class KioskService:
 
     @classmethod
     def supports_inpage_controls(cls) -> bool:
-        """Native-messaging shortcuts are not yet verified with Ubuntu's Chromium Snap."""
-        return distribution_id() != "ubuntu"
+        """In-page controls work on Fedora (native messaging) and Ubuntu (localhost bridge)."""
+        return True
 
     @classmethod
-    def get_kiosk_flags(cls, enable_controls: bool = True) -> list[str]:
+    def supports_permanent_extension(cls) -> bool:
+        """Installing the extension into every Chromium launch (/etc/chromium) is Fedora-only."""
+        return distribution_id() != "ubuntu"
+
+    @staticmethod
+    def is_snap_browser(browser: str | None) -> bool:
+        resolved = shutil.which(browser or "") or ""
+        if resolved.startswith("/snap/"):
+            return True
+        # Ubuntu's chromium-browser .deb is only a wrapper that launches the Snap.
+        return Path(resolved).name in ("chromium-browser", "chromium") and Path("/snap/bin/chromium").exists()
+
+    @classmethod
+    def uses_bridge(cls, browser: str | None = None) -> bool:
+        """Ubuntu (and any Snap browser) cannot use native messaging -> localhost bridge."""
+        return distribution_id() == "ubuntu" or cls.is_snap_browser(browser)
+
+    @classmethod
+    def prepare_bridge_extension(cls, browser: str | None = None, target: Path | None = None) -> Path:
+        """Copy the extension (without the native host) to a browser-readable folder
+        and write the bridge port/token next to it, readable only by the extension."""
+        from core.kiosk_bridge import load_or_create_config
+
+        dest = target or (cls.SNAP_BRIDGE_EXTENSION_DIR if cls.is_snap_browser(browser) else cls.BRIDGE_EXTENSION_DIR)
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(cls.EXTENSION_DIR, dest, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("host", "__pycache__"))
+        os.chmod(dest, 0o700)
+        cfg = load_or_create_config()
+        cfg_file = dest / "bridge_config.json"
+        fd = os.open(cfg_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"url": f"http://127.0.0.1:{cfg['port']}/action", "token": cfg["token"]}, fh)
+        return dest
+
+    @classmethod
+    def get_kiosk_flags(cls, enable_controls: bool = True, browser: str | None = None) -> list[str]:
         flags = [
-            "--ozone-platform=wayland",
+            # Wayland on a Wayland session, X11 otherwise (forcing wayland
+            # breaks Chromium on an Xorg login).
+            "--ozone-platform-hint=auto",
             "--kiosk",
             "--noerrdialogs",
+            "--no-first-run",
+            # After a power cut: no "Restore pages?" bubble.
+            "--hide-crash-restore-bubble",
             "--disable-session-crashed-bubble",
             "--disable-infobars",
+            # With autologin GNOME Keyring is locked; without this Chromium
+            # blocks on an unlock prompt behind the kiosk window.
+            "--password-store=basic",
             "--check-for-update-interval=31536000"
         ]
         if enable_controls and cls.supports_inpage_controls():
-            ext_dir = cls.INSTALLED_EXTENSION_DIR if cls.INSTALLED_EXTENSION_DIR.exists() else cls.EXTENSION_DIR
+            if cls.uses_bridge(browser):
+                try:
+                    ext_dir = cls.prepare_bridge_extension(browser)
+                except OSError:
+                    logger.exception("Could not prepare kiosk extension for bridge mode")
+                    return flags
+            else:
+                ext_dir = cls.INSTALLED_EXTENSION_DIR if cls.INSTALLED_EXTENSION_DIR.exists() else cls.EXTENSION_DIR
             if ext_dir.exists():
                 flags.append(f"--load-extension={ext_dir.resolve()}")
         return flags
@@ -297,8 +364,7 @@ class KioskService:
     @classmethod
     def clean_stale_singleton_locks(cls) -> None:
         """Safely removes stale Singleton lock files from browser config directories."""
-        for name in ["chromium", "google-chrome", "BraveSoftware/Brave-Browser"]:
-            pdir = Path.home() / ".config" / name
+        for pdir in BROWSER_PROFILE_DIRS:
             if pdir.exists():
                 for lock in pdir.glob("Singleton*"):
                     try:
@@ -314,8 +380,19 @@ class KioskService:
         script_path = bin_dir / "launch-kiosk.sh"
         content = """#!/usr/bin/env bash
 # SUIT Autodarts Kiosk Launcher
-# Remove stale lock files to ensure unattended boot never hangs after crash or hostname change
-rm -f "$HOME/.config/chromium/Singleton"* "$HOME/.config/google-chrome/Singleton"* 2>/dev/null
+# After a power cut or hostname change Chromium refuses to start ("profile in
+# use") or shows a restore bubble. Clean both for every known profile root,
+# including Ubuntu's Chromium Snap under ~/snap/chromium/common/chromium.
+for profile_root in "$HOME/.config/chromium" "$HOME/snap/chromium/common/chromium" \
+                    "$HOME/.config/google-chrome" "$HOME/.config/BraveSoftware/Brave-Browser"; do
+    [ -d "$profile_root" ] || continue
+    rm -f "$profile_root"/Singleton* 2>/dev/null
+    prefs="$profile_root/Default/Preferences"
+    if [ -f "$prefs" ]; then
+        sed -i -e 's/"exited_cleanly":false/"exited_cleanly":true/' \
+               -e 's/"exit_type":"[A-Za-z]*"/"exit_type":"Normal"/' "$prefs" 2>/dev/null
+    fi
+done
 
 # Automatically dismiss GNOME Shell Overview on startup so kiosk displays fullscreen seamlessly
 (
@@ -327,8 +404,15 @@ rm -f "$HOME/.config/chromium/Singleton"* "$HOME/.config/google-chrome/Singleton
     done
 ) &
 
+# Ubuntu / Chromium Snap: start the localhost bridge for the in-page controls
+# inside this graphical session (logind then allows poweroff/reboot). It exits
+# immediately if it is already running.
+if [ -f "$HOME/.config/suit/kiosk_bridge.json" ] && [ -f "__SUIT_ROOT__/core/kiosk_bridge.py" ]; then
+    python3 "__SUIT_ROOT__/core/kiosk_bridge.py" >/dev/null 2>&1 &
+fi
+
 exec "$@"
-"""
+""".replace("__SUIT_ROOT__", str(PROJECT_ROOT))
         script_path.write_text(content, encoding="utf-8")
         script_path.chmod(0o755)
         return script_path
@@ -354,7 +438,7 @@ exec "$@"
     def generate_desktop_entry(cls, url: str, browser: str = "chromium", enable_controls: bool = True) -> str:
         launcher = cls.ensure_launcher_script()
         actual_browser = cls.resolve_browser(browser)
-        flags = cls.get_kiosk_flags(enable_controls=enable_controls)
+        flags = cls.get_kiosk_flags(enable_controls=enable_controls, browser=actual_browser)
         cmd = f'{launcher} {actual_browser} {" ".join(flags)} "{url}"'
         return f"""[Desktop Entry]
 Type=Application
@@ -375,7 +459,7 @@ X-GNOME-Autostart-enabled=true
                 logger.info(f"Removed kiosk autostart file: {target_file}")
                 return True
 
-            if enable_controls and cls.supports_inpage_controls():
+            if enable_controls and not cls.uses_bridge(cls.resolve_browser(browser)):
                 cls.ensure_native_messaging_host()
 
             target_file.parent.mkdir(parents=True, exist_ok=True)

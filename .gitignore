@@ -36,3 +36,4 @@ tools/camera-focus-web/
 core/recognition_arbiter.py
 core/vision_critic.py
 modules_gtk/cam_calibration/step_dashboard.py
+kiosk_extension/bridge_config.json

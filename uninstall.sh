@@ -26,6 +26,12 @@ for auto in suit-rotation.desktop suit-kiosk.desktop suit-chromium.desktop; do
     fi
 done
 
+echo "  - Stopping kiosk bridge and removing its token and extension copies"
+pkill -f "core/kiosk_bridge.py" 2>/dev/null || true
+rm -f "$HOME/.config/suit/kiosk_bridge.json"
+rm -rf "$HOME/snap/chromium/common/suit-kiosk-extension" \
+       "$HOME/.local/share/suit/kiosk_extension_bridge"
+
 echo "[3/5] Removing SUIT touch calibration udev rules..."
 if [ -f "/etc/udev/rules.d/99-suit-touch.rules" ]; then
     echo "  - Removing /etc/udev/rules.d/99-suit-touch.rules"
