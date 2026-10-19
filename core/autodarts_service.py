@@ -948,55 +948,187 @@ def is_autodarts_installed() -> bool:
     )
 
 
-def install_autodarts() -> tuple[bool, str]:
-    """Install official Autodarts v2 release and configure user systemd service."""
+# Official Autodarts v2 installer. Downloaded to a file over HTTPS before it is
+# executed, so a failed or truncated download can never be piped into bash.
+AUTODARTS_INSTALLER_URL = os.environ.get("SUIT_AUTODARTS_INSTALLER_URL", "https://autodarts.sh")
+LEGACY_SYSTEM_UNITS = ("autodarts.service", "autodartsupdater.service")
+SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
+BACKUP_ROOT = Path.home() / ".local" / "share" / "suit" / "backup"
+
+
+def detect_existing_installation(system_unit_dir: Path | None = None) -> dict:
+    """Describe what Autodarts installation is present, without changing anything.
+
+    Returns a dict with:
+      system_units:   legacy v1 system unit files found in /etc/systemd/system
+      system_active:  whether the system autodarts.service is currently running
+      user_unit:      whether the v2 user unit exists
+      binary:         resolved autodarts binary path or ""
+    """
+    unit_dir = system_unit_dir or SYSTEM_UNIT_DIR
+    system_units = [str(unit_dir / name) for name in LEGACY_SYSTEM_UNITS if (unit_dir / name).is_file()]
+    system_active = False
+    if system_units:
+        try:
+            res = subprocess.run(
+                ["systemctl", "is-active", "autodarts.service"],
+                capture_output=True, text=True, timeout=3,
+            )
+            system_active = res.stdout.strip() == "active"
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return {
+        "system_units": system_units,
+        "system_active": system_active,
+        "user_unit": USER_UNIT_PATH.is_file(),
+        "binary": get_autodarts_cli_binary() or "",
+    }
+
+
+def backup_unit_files(paths: list[str], backup_root: Path | None = None) -> Path | None:
+    """Copy unit files (world-readable, no root needed) to a timestamped backup dir."""
+    if not paths:
+        return None
+    root = backup_root or BACKUP_ROOT
+    target = root / f"autodarts-{time.strftime('%Y%m%d-%H%M%S')}"
+    target.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        src = Path(path)
+        if src.is_file():
+            shutil.copy2(src, target / src.name)
+    logger.info("Backed up Autodarts unit files to %s", target)
+    return target
+
+
+def _remove_legacy_system_service(unit_paths: list[str]) -> tuple[bool, str]:
+    """Stop, disable and remove legacy v1 system units with one authorization prompt.
+
+    The privileged script is a fixed template; the only interpolated values are
+    unit paths found under /etc/systemd/system, each shell-quoted. Fails closed:
+    if authorization is refused or a unit file remains, the caller must abort.
+    """
+    import shlex
+    from core.admin import admin_prefix
+
+    allowed = {str(SYSTEM_UNIT_DIR / name) for name in LEGACY_SYSTEM_UNITS}
+    unit_paths = [p for p in unit_paths if p in allowed]
+    if not unit_paths:
+        return True, "No legacy system service to remove."
+    units = " ".join(shlex.quote(Path(p).name) for p in unit_paths)
+    files = " ".join(shlex.quote(p) for p in unit_paths)
+    script = (
+        "set -e; "
+        f"systemctl disable --now {units} || true; "
+        f"rm -f {files}; "
+        "systemctl daemon-reload"
+    )
+    try:
+        res = subprocess.run(
+            [*admin_prefix(), "/bin/bash", "-c", script],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"Could not remove legacy service: {exc}"
+    if res.returncode != 0:
+        detail = (res.stderr or res.stdout).strip() or f"exit {res.returncode}"
+        return False, f"Administrator action refused or failed: {detail}"
+    remaining = [p for p in unit_paths if Path(p).exists()]
+    if remaining:
+        return False, f"Legacy service files still present: {', '.join(remaining)}"
+    return True, "Legacy system service removed."
+
+
+def _stop_running_autodarts(grace_seconds: float = 5.0) -> None:
+    """Stop the user service, then stray processes: SIGTERM first, SIGKILL only as last resort."""
+    subprocess.run(["systemctl", "--user", "stop", "autodarts.service"], capture_output=True, timeout=20)
+    subprocess.run(["pkill", "-TERM", "-x", "autodarts"], capture_output=True, timeout=5)
+    deadline = time.monotonic() + grace_seconds
+    while time.monotonic() < deadline:
+        if subprocess.run(["pgrep", "-x", "autodarts"], capture_output=True).returncode != 0:
+            return
+        time.sleep(0.25)
+    logger.warning("autodarts did not exit after SIGTERM, sending SIGKILL")
+    subprocess.run(["pkill", "-KILL", "-x", "autodarts"], capture_output=True, timeout=5)
+
+
+def _run_official_installer(url: str = AUTODARTS_INSTALLER_URL) -> tuple[bool, str]:
+    """Download the installer to a private temp file over HTTPS, then execute it."""
+    import tempfile
+
+    if not url.startswith("https://"):
+        return False, f"Refusing non-HTTPS installer URL: {url}"
+    with tempfile.TemporaryDirectory(prefix="suit-autodarts-") as td:
+        script = Path(td) / "install.sh"
+        dl = subprocess.run(
+            ["curl", "-fsSL", "--proto", "=https", "--tlsv1.2", "-o", str(script), url],
+            capture_output=True, text=True, timeout=60,
+        )
+        if dl.returncode != 0 or not script.is_file() or script.stat().st_size == 0:
+            return False, f"Could not download Autodarts installer: {dl.stderr.strip() or 'empty file'}"
+        proc = subprocess.run(
+            ["bash", str(script), "--headless"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if proc.returncode != 0:
+            logger.warning("Installer returned %s: %s", proc.returncode, proc.stderr)
+            return False, f"Installation script failed: {proc.stderr.strip() or 'Unknown error'}"
+    return True, "Installer completed."
+
+
+def install_autodarts(replace_system_service: bool = False) -> tuple[bool, str]:
+    """Install official Autodarts v2 release and configure user systemd service.
+
+    A legacy v1 *system* service is never removed implicitly. If one exists,
+    the call returns (False, msg) unless replace_system_service=True, which the
+    UI only passes after the user has confirmed. Unit files are backed up first.
+    """
     user = getpass.getuser()
     home = Path.home()
 
-    # 1. Preserve existing credentials and camera settings
+    # 1. Inspect before touching anything.
+    existing = detect_existing_installation()
+    if existing["system_units"] and not replace_system_service:
+        state = "running" if existing["system_active"] else "installed"
+        return False, (
+            f"A system-wide Autodarts service is {state}. "
+            "Confirm replacement to migrate it to the SUIT-managed user service."
+        )
+
+    # 2. Preserve existing credentials and camera settings
     preserved_bid, preserved_key = read_stored_auth()
     preserved_cam = read_cam_config()
 
-    # 2. Stop and remove legacy v1 system service if present
-    cleanup_v1_cmd = (
-        "sudo -n systemctl stop autodarts.service autodartsupdater.service 2>/dev/null || true; "
-        "sudo -n systemctl disable autodarts.service autodartsupdater.service 2>/dev/null || true; "
-        "sudo -n rm -f /etc/systemd/system/autodarts.service "
-        "/etc/systemd/system/autodartsupdater.service "
-        "/etc/systemd/system/*.wants/autodarts.service "
-        "/etc/systemd/system/*.wants/autodartsupdater.service 2>/dev/null || true; "
-        "sudo -n systemctl daemon-reload 2>/dev/null || true"
-    )
-    try:
-        subprocess.run(cleanup_v1_cmd, shell=True, capture_output=True, text=True, timeout=10)
-    except Exception as e:
-        logger.warning("Legacy v1 cleanup check warning: %s", e)
+    # 3. Back up and remove legacy v1 system service only after confirmation
+    if existing["system_units"]:
+        try:
+            backup_dir = backup_unit_files(existing["system_units"])
+        except OSError as exc:
+            return False, f"Could not back up existing service files, nothing changed: {exc}"
+        ok, msg = _remove_legacy_system_service(existing["system_units"])
+        if not ok:
+            return False, f"{msg} Nothing else was changed. Backup: {backup_dir}"
 
-    # 3. Stop any stray foreground or background autodarts processes
+    # 4. Stop the running v2 instance gracefully so the installer can replace the binary
     try:
-        subprocess.run("pkill -9 -x autodarts 2>/dev/null || true", shell=True, timeout=5)
+        _stop_running_autodarts()
         for _ in range(6):
             if not is_port_open(DEFAULT_HOST, DEFAULT_V2_PORT, timeout=0.05) and not is_port_open(DEFAULT_HOST, DEFAULT_V1_PORT, timeout=0.05):
                 break
             time.sleep(0.5)
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired):
         pass
 
-    # 4. Run official installer
-    install_cmd = (
-        f"curl -fsSL autodarts.sh | bash -s -- --headless && "
-        f"sudo -n usermod -aG video {user} 2>/dev/null || true"
-    )
+    # 5. Run official installer
+    ok, msg = _run_official_installer()
+    if not ok:
+        return False, msg
     try:
-        proc = subprocess.run(install_cmd, shell=True, capture_output=True, text=True, timeout=120)
-        if proc.returncode != 0:
-            logger.warning("Installer script returned %s: %s", proc.returncode, proc.stderr)
-            return False, f"Installation script failed: {proc.stderr.strip() or 'Unknown error'}"
-    except Exception as e:
-        logger.exception("Failed executing autodarts.sh installer")
-        return False, str(e)
+        from core.admin import admin_prefix
+        subprocess.run([*admin_prefix(), "usermod", "-aG", "video", user], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning("Could not add %s to video group", user)
 
-    # 5. Locate binary
+    # 6. Locate binary
     bin_candidates = [
         home / ".local" / "share" / "autodarts" / "autodarts",
         home / ".local" / "bin" / "autodarts",
@@ -1015,7 +1147,7 @@ def install_autodarts() -> tuple[bool, str]:
     if not autodarts_bin:
         return False, "Installation completed, but autodarts binary could not be found."
 
-    # 6. Configure systemd user service (~/.config/systemd/user/autodarts.service)
+    # 7. Configure systemd user service (~/.config/systemd/user/autodarts.service)
     user_unit_dir = home / ".config" / "systemd" / "user"
     user_unit_file = user_unit_dir / "autodarts.service"
     if not ensure_service_unit(user_unit_file, autodarts_bin):
@@ -1024,7 +1156,7 @@ def install_autodarts() -> tuple[bool, str]:
     # Ensure required configuration and state directories exist cleanly
     ensure_autodarts_dirs()
 
-    # 7. Restore preserved credentials and camera configuration before starting
+    # 8. Restore preserved credentials and camera configuration before starting
     if preserved_bid or preserved_key:
         save_stored_auth(preserved_bid, preserved_key)
     if any(preserved_cam.get("cams", [])):
@@ -1037,13 +1169,13 @@ def install_autodarts() -> tuple[bool, str]:
             standby_minutes=preserved_cam.get("standby_minutes", 15)
         )
 
-    # 8. Enable user lingering so service runs across reboots without GUI login
+    # 9. Enable user lingering so service runs across reboots without GUI login
     try:
         subprocess.run(f"loginctl enable-linger {user} 2>/dev/null || true", shell=True, timeout=5)
     except Exception:
         pass
 
-    # 9. Reload user systemd daemon, reset failure count, enable and start service
+    # 10. Reload user systemd daemon, reset failure count, enable and start service
     service_cmd = (
         "systemctl --user daemon-reload && "
         "systemctl --user reset-failed autodarts.service 2>/dev/null || true; "
@@ -1057,7 +1189,7 @@ def install_autodarts() -> tuple[bool, str]:
     except Exception as e:
         logger.warning("Failed enabling systemd user service: %s", e)
 
-    # 10. Verify API listener
+    # 11. Verify API listener
     target_port = get_autodarts_port()
     api_ready = False
     for _ in range(10):

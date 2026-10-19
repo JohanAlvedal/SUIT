@@ -28,6 +28,12 @@ passwordless sudo. No root account or global Python pip installation is needed.
 - Development is tested statically; **not yet verified on a physical Ubuntu NUC**.
 - Autodarts must be installed and configured separately. Do not reinstall or
   remove a working Autodarts service just to test this GUI.
+- SUIT's **Install Autodarts** never removes an existing system-wide
+  `autodarts.service` silently. It asks first, backs up the unit files to
+  `~/.local/share/suit/backup/autodarts-<timestamp>/`, requests one Polkit
+  authorization and aborts without further changes if that is refused. The
+  installer is downloaded over HTTPS to a temporary file before it runs
+  (override with `SUIT_AUTODARTS_INSTALLER_URL`).
 - Chromium on Ubuntu is usually packaged as a **Snap**. Kiosk fullscreen
   launch remains available, but SUIT's in-page session/power shortcuts are
   currently disabled on Ubuntu: the extension's Native Messaging host is not

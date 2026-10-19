@@ -12,7 +12,7 @@ from core.logger import get_logger
 from core.systemd_service import SystemdService
 from core.autodarts_service import (
     get_autodarts_cli_binary, is_autodarts_installed,
-    install_autodarts, uninstall_autodarts,
+    install_autodarts, uninstall_autodarts, detect_existing_installation,
     is_service_enabled, set_service_enabled
 )
 from modules_gtk.async_utils import run_async
@@ -349,10 +349,53 @@ class AutodartsView(Adw.NavigationPage):
             return
         self.is_busy = True
         self.spinner.start()
+
+        def on_detected(existing):
+            self.is_busy = False
+            self.spinner.stop()
+            if isinstance(existing, dict) and existing.get("system_units"):
+                self._confirm_replace_system_service(existing)
+            else:
+                self._run_install(replace_system_service=False)
+
+        run_async(detect_existing_installation, on_done=on_detected)
+
+    def _confirm_replace_system_service(self, existing: dict):
+        """Never migrate a working system-wide Autodarts install without explicit consent."""
+        state = "is running" if existing.get("system_active") else "is installed"
+        files = "\n".join(existing.get("system_units", []))
+        dialog = Adw.AlertDialog(
+            heading="Replace existing Autodarts service?",
+            body=(
+                f"A system-wide Autodarts service {state}:\n{files}\n\n"
+                "SUIT will back up these files to ~/.local/share/suit/backup, stop and "
+                "remove the system service, and install Autodarts v2 as a user service. "
+                "Your board ID, API key and camera settings are kept.\n\n"
+                "You will be asked for your administrator password."
+            ),
+        )
+        dialog.add_response("cancel", "Keep Current Install")
+        dialog.add_response("replace", "Back Up and Replace")
+        dialog.set_response_appearance("replace", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def on_response(_d, response):
+            if response == "replace":
+                self._run_install(replace_system_service=True)
+
+        dialog.connect("response", on_response)
+        dialog.present(self.window)
+
+    def _run_install(self, replace_system_service: bool):
+        if self.is_busy:
+            return
+        self.is_busy = True
+        self.spinner.start()
         self.window.show_toast("Installing Autodarts...")
 
         def worker():
-            return install_autodarts()
+            return install_autodarts(replace_system_service=replace_system_service)
 
         def on_done(res):
             self.is_busy = False
