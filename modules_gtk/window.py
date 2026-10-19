@@ -2,6 +2,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Gdk, GLib
+import importlib
+import sys
 import time
 import threading
 from pathlib import Path
@@ -13,6 +15,9 @@ from modules_gtk.async_utils import run_async
 from modules_gtk.menu import MainMenuView
 
 logger = get_logger("window")
+
+# Longest the window stays open after a close request while the Camera Optimizer restores a camera
+RESTORE_WAIT_S = 20.0
 
 class SuitWindow(Adw.ApplicationWindow):
     def __init__(self, app):
@@ -75,7 +80,7 @@ class SuitWindow(Adw.ApplicationWindow):
         self.btn_back.set_tooltip_text("Back to Menu")
         self.btn_back.set_size_request(46, 44)
         self.btn_back.set_visible(False)
-        self.btn_back.connect("clicked", lambda b: self.nav_view.pop())
+        self.btn_back.connect("clicked", lambda b: self._on_back_clicked())
         self.header_bar.pack_start(self.btn_back)
 
         # Title Widget
@@ -104,19 +109,26 @@ class SuitWindow(Adw.ApplicationWindow):
         self._last_visible_page = self.menu_page
         self.nav_view.push(self.menu_page)
 
-        # Never ask for blanket passwordless administrator access on startup.
-
-        # Ubuntu hardware may stall while heavy OpenCV imports and a complete
-        # camera page are built during startup. Load the page only on demand
-        # until the Ubuntu-specific performance path has been measured.
+        # No blanket passwordless administrator access on startup.
+        # Delay expensive GTK camera page initialization on Ubuntu.
         if distribution_id() != "ubuntu":
             self._start_background_prewarm()
 
         # Handle window close request to cleanly tear down active page & services
         self.connect("close-request", self._on_close_request)
 
+    def _on_back_clicked(self):
+        """Header back: a page may ask first (e.g. Camera Optimizer while tuning)."""
+        page = self.nav_view.get_visible_page()
+        confirm = getattr(page, "confirm_leave", None)
+        if callable(confirm) and confirm(self.nav_view.pop):
+            return
+        self.nav_view.pop()
+
     def _on_close_request(self, *args):
         """Lifecycle hook when window close is requested: cleanly teardown active page."""
+        if getattr(self, "_close_ready", False):
+            return False
         logger.info("Window close requested: running active page cleanup")
         page = self.nav_view.get_visible_page()
         if page and hasattr(page, "on_page_closed"):
@@ -125,31 +137,49 @@ class SuitWindow(Adw.ApplicationWindow):
             except Exception:
                 logger.exception("Error executing on_page_closed on window close")
 
-        # Give any restore thread a brief moment to finish before window destruction
-        if page and hasattr(page, "_restore_thread"):
-            t = getattr(page, "_restore_thread")
-            if t and t.is_alive():
-                t.join(timeout=1.0)
+        # The Camera Optimizer first has to stop mid-measurement and put the camera back. That
+        # can take several seconds, so keep the window (insensitive) until its restore thread is
+        # done instead of exiting with a camera on test settings. Its page may already be popped.
+        threads = []
+        for p in (page, getattr(self, "cam_calibration_page", None)):
+            t = getattr(p, "_restore_thread", None) if p is not None else None
+            if t is not None and t.is_alive() and t not in threads:
+                threads.append(t)
+        if not threads:
+            return False
 
-        return False
+        self.set_sensitive(False)
+        self.title_widget.set_subtitle("Putting the cameras back…")
+        deadline = time.monotonic() + RESTORE_WAIT_S
+
+        def _poll():
+            if any(t.is_alive() for t in threads) and time.monotonic() < deadline:
+                return True
+            if any(t.is_alive() for t in threads):
+                logger.error("Camera restore still running after %.0f s; closing anyway", RESTORE_WAIT_S)
+            self._close_ready = True
+            self.close()
+            return False
+
+        GLib.timeout_add(100, _poll)
+        return True
 
     def _start_background_prewarm(self):
         """Asynchronously pre-warm heavy dependencies (OpenCV, GStreamer, CameraFocusView)
         so that tapping the Camera Focus menu card is instantaneous on the first click."""
         def _bg_prewarm():
             time.sleep(0.4)  # Let main menu render smoothly first
+            # Auto-heal boot services (e.g. after CLI git pull); independent of OpenCV availability
+            try:
+                UpdateService.ensure_camera_boot_service()
+                UpdateService.ensure_display_autostart()
+            except Exception as e:
+                logger.debug("Background service heal notice: %s", e)
+
             try:
                 # Pre-import heavy native C extensions in background thread
                 import cv2  # noqa: F401
                 from modules_gtk.camera_focus_view import CameraFocusView
-
-                # Fedora's existing service-healing behavior remains background-only.
-                # Ubuntu deliberately leaves working Autodarts and display services alone.
-                try:
-                    UpdateService.ensure_camera_boot_service()
-                    UpdateService.ensure_display_autostart()
-                except Exception as e:
-                    logger.debug("Background service heal notice: %s", e)
 
                 def _init_page():
                     if not self.focus_page:
@@ -280,6 +310,45 @@ class SuitWindow(Adw.ApplicationWindow):
             dialog.add_response("ok", "OK")
             dialog.present(self)
 
+    def _prompt_install_opencv(self, tool_name, retry_cb):
+        dialog = Adw.AlertDialog(
+            heading="OpenCV Required",
+            body=f"{tool_name} requires OpenCV (python3-opencv)."
+        )
+        dialog.add_response("cancel", "Later")
+        dialog.add_response("install", "Install Now")
+        dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_resp(d, resp):
+            if resp != "install":
+                return
+            self.show_toast("Installing python3-opencv...")
+
+            def worker():
+                return UpdateService.install_requirements(["python3-opencv"])
+
+            def on_done(res):
+                ok, msg = res
+                if not ok:
+                    self.show_toast(msg)
+                    return
+                # Freshly installed system modules need fresh import finders; a partially failed
+                # import may also be cached, so verify before retrying to avoid a dialog loop.
+                importlib.invalidate_caches()
+                sys.modules.pop("cv2", None)
+                try:
+                    import cv2  # noqa: F401
+                except ImportError:
+                    self.show_toast("OpenCV installed. Please restart SUIT to use this tool.")
+                    return
+                self.show_toast(msg)
+                retry_cb()
+
+            run_async(worker, on_done=on_done)
+
+        dialog.connect("response", on_resp)
+        dialog.present(self)
+
     def open_cam_calibration_page(self):
         try:
             if not self.cam_calibration_page:
@@ -290,28 +359,7 @@ class SuitWindow(Adw.ApplicationWindow):
                 self.cam_calibration_page.on_page_opened()
         except ImportError as e:
             logger.exception("Camera Optimizer unavailable due to missing dependency: %s", e)
-            dialog = Adw.AlertDialog(
-                heading="OpenCV Required",
-                body="Camera Optimizer requires OpenCV (python3-opencv)."
-            )
-            dialog.add_response("cancel", "Later")
-            dialog.add_response("install", "Install Now")
-            dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
-
-            def on_resp(d, resp):
-                if resp == "install":
-                    self.show_toast("Installing python3-opencv...")
-                    def worker():
-                        return UpdateService.install_requirements(["python3-opencv"])
-                    def on_done(res):
-                        ok, msg = res
-                        self.show_toast(msg)
-                        if ok:
-                            self.open_cam_calibration_page()
-                    run_async(worker, on_done=on_done)
-
-            dialog.connect("response", on_resp)
-            dialog.present(self)
+            self._prompt_install_opencv("Camera Optimizer", self.open_cam_calibration_page)
         except Exception as e:
             logger.exception("Failed to open Camera Optimizer: %s", e)
             dialog = Adw.AlertDialog(
@@ -331,28 +379,7 @@ class SuitWindow(Adw.ApplicationWindow):
                 self.focus_page.on_page_opened()
         except ImportError as e:
             logger.exception("Camera Focus Tool unavailable due to missing dependency: %s", e)
-            dialog = Adw.AlertDialog(
-                heading="OpenCV Required",
-                body="Camera Focus Tool requires OpenCV (python3-opencv)."
-            )
-            dialog.add_response("cancel", "Later")
-            dialog.add_response("install", "Install Now")
-            dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
-
-            def on_resp(d, resp):
-                if resp == "install":
-                    self.show_toast("Installing python3-opencv...")
-                    def worker():
-                        return UpdateService.install_requirements(["python3-opencv"])
-                    def on_done(res):
-                        ok, msg = res
-                        self.show_toast(msg)
-                        if ok:
-                            self.open_focus_page()
-                    run_async(worker, on_done=on_done)
-
-            dialog.connect("response", on_resp)
-            dialog.present(self)
+            self._prompt_install_opencv("Camera Focus Tool", self.open_focus_page)
         except Exception as e:
             logger.exception("Failed to open Camera Focus Tool: %s", e)
             dialog = Adw.AlertDialog(

@@ -31,6 +31,32 @@ class BoardROI:
     target_roi: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h) bounding box of furthest double
 
 
+DEFAULT_CAPTURE_RESOLUTION = (1280, 960)
+
+
+def board_mask_from_homography(H_img2board: np.ndarray, shape: Tuple[int, int], radius: float = 330.0) -> np.ndarray:
+    """uint8 mask (255 inside) of the board disc of `radius` board units (1000-unit space, bull at 500)
+    projected into an image of `shape` (h, w). r=330 is just outside the outer double wire."""
+    board = np.zeros((1000, 1000), np.uint8)
+    cv2.circle(board, (500, 500), int(radius), 255, -1)
+    return cv2.warpPerspective(board, np.linalg.inv(H_img2board), (int(shape[1]), int(shape[0])),
+                               flags=cv2.INTER_NEAREST)
+
+
+def get_autodarts_resolution(config_path: Optional[Path] = None) -> Tuple[int, int]:
+    """Return the (width, height) Autodarts streams at, so calibration sees the same sensor mode."""
+    path = config_path or (Path.home() / ".config" / "autodarts" / "config.toml")
+    try:
+        with open(path, "rb") as f:
+            cam = tomllib.load(f).get("cam", {})
+        width, height = int(cam.get("width", 0)), int(cam.get("height", 0))
+        if width > 0 and height > 0:
+            return width, height
+    except Exception as e:
+        logger.debug("Could not read Autodarts resolution from %s: %s", path, e)
+    return DEFAULT_CAPTURE_RESOLUTION
+
+
 class BoardDetector:
     """Detects dartboard position and extracts wire and uniform measurement masks."""
 
@@ -52,6 +78,23 @@ class BoardDetector:
         cam_idx: Optional[int] = None,
     ) -> Optional[np.ndarray]:
         """Load 3x3 homography matrix from ~/.config/autodarts/calibration.json."""
+        entry = self.load_calibration_entry(width, height, dev_node=dev_node, by_path=by_path, cam_idx=cam_idx)
+        return entry["homography"] if entry else None
+
+    def load_calibration_entry(
+        self,
+        width: int,
+        height: int,
+        dev_node: Optional[str] = None,
+        by_path: Optional[str] = None,
+        cam_idx: Optional[int] = None,
+    ) -> Optional[dict]:
+        """Load one camera's Autodarts calibration at the given capture resolution.
+
+        Returns {"homography": 3x3 image->board(1000) matrix, "tip_dir": (x, y) or None,
+        "undistorted": dict (focal scaled to this resolution), "key": calibration.json camera key},
+        or None when the camera has no usable homography.
+        """
         if not self.calibration_path.exists():
             return None
 
@@ -130,16 +173,44 @@ class BoardDetector:
             cam_entry = cams.get(target_key, {})
             res_key = f"{width}x{height}"
             if res_key in cam_entry and "homography" in cam_entry[res_key]:
-                return np.array(cam_entry[res_key]["homography"]).reshape(3, 3)
+                return self._calibration_entry(target_key, cam_entry[res_key], np.eye(3), 1.0)
 
-            for entry_val in cam_entry.values():
-                if isinstance(entry_val, dict) and "homography" in entry_val:
-                    return np.array(entry_val["homography"]).reshape(3, 3)
+            # A homography from another resolution is only valid if it shares the aspect ratio
+            # (pure scaling). Different aspect ratios crop the sensor differently, so reusing one
+            # would misplace every board mask.
+            for entry_key, entry_val in cam_entry.items():
+                if not (isinstance(entry_val, dict) and "homography" in entry_val):
+                    continue
+                m = re.fullmatch(r"(\d+)x(\d+)", str(entry_key))
+                if not m:
+                    continue
+                src_w, src_h = int(m.group(1)), int(m.group(2))
+                if abs(src_w / src_h - width / height) > 0.01:
+                    continue
+                scale_inv = np.diag([src_w / width, src_h / height, 1.0])
+                return self._calibration_entry(target_key, entry_val, scale_inv, width / src_w)
 
         except Exception as e:
             logger.debug("Failed loading calibration homography: %s", e)
 
         return None
+
+    @staticmethod
+    def _calibration_entry(key: str, raw: dict, scale_inv: np.ndarray, scale: float) -> dict:
+        """Normalise one calibration.json resolution entry, rescaled to the capture resolution."""
+        h_mat = np.array(raw["homography"], dtype=np.float64).reshape(3, 3) @ scale_inv
+        tip_dir = raw.get("tip_dir")
+        if tip_dir is not None and len(tip_dir) == 2:
+            # Same aspect ratio means uniform scaling, so the direction is unchanged.
+            tip_dir = (float(tip_dir[0]), float(tip_dir[1]))
+        else:
+            tip_dir = None
+        undist = dict(raw.get("undistorted") or {})
+        undist.pop("homography", None)
+        for k in ("focal", "cx", "cy"):
+            if k in undist:
+                undist[k] = float(undist[k]) * scale
+        return {"homography": h_mat, "tip_dir": tip_dir, "undistorted": undist, "key": key}
 
     def _load_autodarts_geometry(
         self,

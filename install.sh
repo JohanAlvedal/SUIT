@@ -54,7 +54,9 @@ python3 "$ROOT/create_launcher.py"
 # Keep Fedora's existing touchscreen/display boot configuration in sync after
 # an explicit install; do not alter Ubuntu login/display autostarts automatically.
 if [[ "$DISTRO" == "fedora" && -f "$HOME/.suit_rotation_config.json" ]]; then
-  python3 -c "import sys; sys.path.insert(0, '$ROOT'); from core.display_service import DisplayService; DisplayService.ensure_autostart()" 2>/dev/null || true
+  if ! (cd "$ROOT" && python3 -c "from core.display_service import DisplayService; DisplayService.ensure_autostart()"); then
+    echo "  ! Warning: could not synchronize Fedora display autostart. Launch SUIT once to retry."
+  fi
 fi
 echo "SUIT installed. Start it from the Applications menu."
 echo "Some advanced Fedora-specific controls remain unavailable on Ubuntu."
