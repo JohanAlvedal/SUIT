@@ -28,11 +28,25 @@ passwordless sudo. No root account or global Python pip installation is needed.
 - Development is tested statically; **not yet verified on a physical Ubuntu NUC**.
 - Autodarts must be installed and configured separately. Do not reinstall or
   remove a working Autodarts service just to test this GUI.
-- Chromium on Ubuntu is usually packaged as a **Snap**. Kiosk fullscreen
-  launch remains available, but SUIT's in-page session/power shortcuts are
-  currently disabled on Ubuntu: the extension's Native Messaging host is not
-  reliably accessible through the Snap sandbox. Do not claim these shortcuts
-  work until a browser-specific integration has been tested.
+- Chromium on Ubuntu is usually packaged as a **Snap**. A native messaging
+  host started by the Snap runs inside its sandbox and cannot shut down or
+  restart the PC, so on Ubuntu the kiosk's in-page controls (power off,
+  restart, exit kiosk, board light) go through a small **localhost bridge**
+  instead (`core/kiosk_bridge.py`, 127.0.0.1:47231):
+  - started by the kiosk launcher inside the graphical session, so logind
+    allows power actions exactly as from the GNOME menu;
+  - every call needs a random per-install token, stored in
+    `~/.config/suit/kiosk_bridge.json` (0600) and in the extension copy;
+  - web pages cannot trigger it: CORS preflights are never approved, a
+    non-extension `Origin` is refused, and only six fixed actions exist.
+  The extension is copied to `~/snap/chromium/common/suit-kiosk-extension`
+  because the Snap cannot read hidden folders such as `~/.local`.
+  Needs hardware verification before calling it production-ready.
+- Kiosk launch cleans stale `Singleton*` locks and marks the profile as
+  cleanly exited in both `~/.config/chromium` and the Snap profile
+  (`~/snap/chromium/common/chromium`), so a power cut does not leave the kiosk
+  stuck on "profile in use" or a restore bubble. `--password-store=basic`
+  avoids a hidden GNOME Keyring prompt after autologin.
 - Ubuntu skips background camera-page prewarming at startup to reduce the risk
   of freezing the GTK interface. Camera pages still need physical testing.
 - Fedora-specific GNOME RDP controls are hidden on Ubuntu. Use a separately
@@ -44,7 +58,8 @@ passwordless sudo. No root account or global Python pip installation is needed.
   pending a package and platform review.
 - Passwordless sudo is never automatically provisioned in this fork.
 - Explicit administrator changes request Polkit authorization; touch calibration still needs hardware validation.
-- Permanent Chromium Snap in-page controls installation is disabled pending testing.
+- Adding the controls to *every* Chromium window (`/etc/chromium`) stays Fedora-only;
+  on Ubuntu they are loaded by the kiosk launch only.
 - An app update uses a fast-forward only on the **current checked-out branch**;
   it must never hard-reset local changes or swap branches.
 - Fedora-specific system settings may remain unavailable on Ubuntu.

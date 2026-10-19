@@ -59,24 +59,28 @@ class UbuntuSupportTests(unittest.TestCase):
                     self.assertIn(f"Name={expected}", launcher.read_text())
 
     @patch("core.kiosk_service.distribution_id", return_value="ubuntu")
-    def test_ubuntu_kiosk_omits_unverified_native_extension(self, distro):
-        flags = KioskService.get_kiosk_flags(enable_controls=True)
+    def test_ubuntu_kiosk_uses_bridge_extension_not_native_host(self, distro):
+        with tempfile.TemporaryDirectory() as td, \
+             patch.object(KioskService, "prepare_bridge_extension", return_value=Path(td)) as prep, \
+             patch.object(KioskService, "ensure_native_messaging_host") as host:
+            flags = KioskService.get_kiosk_flags(enable_controls=True)
         self.assertIn("--kiosk", flags)
-        self.assertFalse(any(flag.startswith("--load-extension=") for flag in flags))
+        prep.assert_called_once()
+        host.assert_not_called()
 
     @patch("core.kiosk_service.distribution_id", return_value="ubuntu")
     @patch.object(KioskService, "ensure_native_messaging_host")
     def test_ubuntu_autostart_does_not_install_native_host(self, host, distro):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "kiosk.desktop"
-            with patch.object(KioskService, "ensure_launcher_script", return_value=Path(td) / "launch-kiosk.sh"):
+            with patch.object(KioskService, "ensure_launcher_script", return_value=Path(td) / "launch-kiosk.sh"), \
+                 patch.object(KioskService, "prepare_bridge_extension", return_value=Path(td)):
                 ok = KioskService.set_autostart(
                     True, url="https://play.autodarts.com/", desktop_file=path, enable_controls=True
                 )
             self.assertTrue(ok)
             self.assertTrue(path.exists())
             self.assertIn("--kiosk", path.read_text())
-            self.assertNotIn("--load-extension=", path.read_text())
             host.assert_not_called()
 
     def test_unrestricted_sudo_not_granted(self):
