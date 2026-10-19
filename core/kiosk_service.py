@@ -16,6 +16,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXTENSION_DIR = PROJECT_ROOT / "kiosk_extension"
 HOST_SCRIPT = EXTENSION_DIR / "host" / "suit_kiosk_host.py"
 
+# Browser profile roots. Ubuntu's Chromium is a Snap whose profile lives under
+# ~/snap/chromium/common/chromium instead of ~/.config/chromium.
+SNAP_CHROMIUM_COMMON = Path.home() / "snap" / "chromium" / "common"
+BROWSER_PROFILE_DIRS = [
+    Path.home() / ".config" / "chromium",
+    SNAP_CHROMIUM_COMMON / "chromium",
+    Path.home() / ".config" / "google-chrome",
+    Path.home() / ".config" / "BraveSoftware" / "Brave-Browser",
+]
+
 NATIVE_MESSAGING_DIRS = [
     Path.home() / ".config" / "chromium" / "NativeMessagingHosts",
     Path.home() / ".config" / "google-chrome" / "NativeMessagingHosts",
@@ -281,11 +291,19 @@ class KioskService:
     @classmethod
     def get_kiosk_flags(cls, enable_controls: bool = True) -> list[str]:
         flags = [
-            "--ozone-platform=wayland",
+            # Wayland on a Wayland session, X11 otherwise (forcing wayland
+            # breaks Chromium on an Xorg login).
+            "--ozone-platform-hint=auto",
             "--kiosk",
             "--noerrdialogs",
+            "--no-first-run",
+            # After a power cut: no "Restore pages?" bubble.
+            "--hide-crash-restore-bubble",
             "--disable-session-crashed-bubble",
             "--disable-infobars",
+            # With autologin GNOME Keyring is locked; without this Chromium
+            # blocks on an unlock prompt behind the kiosk window.
+            "--password-store=basic",
             "--check-for-update-interval=31536000"
         ]
         if enable_controls and cls.supports_inpage_controls():
@@ -297,8 +315,7 @@ class KioskService:
     @classmethod
     def clean_stale_singleton_locks(cls) -> None:
         """Safely removes stale Singleton lock files from browser config directories."""
-        for name in ["chromium", "google-chrome", "BraveSoftware/Brave-Browser"]:
-            pdir = Path.home() / ".config" / name
+        for pdir in BROWSER_PROFILE_DIRS:
             if pdir.exists():
                 for lock in pdir.glob("Singleton*"):
                     try:
@@ -314,8 +331,19 @@ class KioskService:
         script_path = bin_dir / "launch-kiosk.sh"
         content = """#!/usr/bin/env bash
 # SUIT Autodarts Kiosk Launcher
-# Remove stale lock files to ensure unattended boot never hangs after crash or hostname change
-rm -f "$HOME/.config/chromium/Singleton"* "$HOME/.config/google-chrome/Singleton"* 2>/dev/null
+# After a power cut or hostname change Chromium refuses to start ("profile in
+# use") or shows a restore bubble. Clean both for every known profile root,
+# including Ubuntu's Chromium Snap under ~/snap/chromium/common/chromium.
+for profile_root in "$HOME/.config/chromium" "$HOME/snap/chromium/common/chromium" \
+                    "$HOME/.config/google-chrome" "$HOME/.config/BraveSoftware/Brave-Browser"; do
+    [ -d "$profile_root" ] || continue
+    rm -f "$profile_root"/Singleton* 2>/dev/null
+    prefs="$profile_root/Default/Preferences"
+    if [ -f "$prefs" ]; then
+        sed -i -e 's/"exited_cleanly":false/"exited_cleanly":true/' \
+               -e 's/"exit_type":"[A-Za-z]*"/"exit_type":"Normal"/' "$prefs" 2>/dev/null
+    fi
+done
 
 # Automatically dismiss GNOME Shell Overview on startup so kiosk displays fullscreen seamlessly
 (
