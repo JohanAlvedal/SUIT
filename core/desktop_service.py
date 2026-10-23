@@ -1,5 +1,6 @@
 import subprocess
 import ast
+import json
 import shutil
 from pathlib import Path
 from core.logger import get_logger
@@ -34,6 +35,33 @@ headerbar button.titlebutton image,
 }}
 {SUIT_TOUCH_MARKER_END}
 """
+
+
+TOUCH_KEYS = [
+    ("org.gnome.desktop.a11y.applications", "screen-keyboard-enabled"),
+    ("org.gnome.desktop.wm.preferences", "button-layout"),
+    ("org.gnome.desktop.interface", "text-scaling-factor"),
+]
+
+# Keys "Apply Theme" changes; their previous values are saved once so
+# "Restore" can bring back exactly what the user had (not just a default).
+VISUAL_KEYS = [
+    ("org.gnome.desktop.background", "picture-uri"),
+    ("org.gnome.desktop.background", "picture-uri-dark"),
+    ("org.gnome.desktop.background", "picture-options"),
+    ("org.gnome.desktop.interface", "color-scheme"),
+    ("org.gnome.desktop.app-folders", "folder-children"),
+]
+APP_FOLDER_SCHEMA = "org.gnome.desktop.app-folders.folder:/org/gnome/desktop/app-folders/folders/"
+VISUALS_BACKUP_PATH = Path.home() / ".config" / "suit" / "desktop_before_suit.json"
+
+
+def _gsettings_get(schema: str, key: str) -> str | None:
+    try:
+        res = subprocess.run(["gsettings", "get", schema, key], capture_output=True, text=True, timeout=5)
+        return res.stdout.strip() if res.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
 
 
 class DesktopService:
@@ -196,14 +224,11 @@ class DesktopService:
                 return True, "Touchscreen tweaks, window controls, and on-screen keyboard applied."
 
             else:
-                # 1. Disable On-Screen Keyboard (OSK)
-                cls.set_osk(False)
-
-                # 2. Reset Window Controls Button Layout back to close only
-                cls.set_button_layout("appmenu:close")
-
-                # 3. Reset text scaling factor back to default 1.0
-                subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "text-scaling-factor", "1.0"], check=False)
+                # 1-3. Back to this distro's own defaults (gsettings reset):
+                # Ubuntu shows minimize/maximize/close, Fedora only close, so a
+                # hard-coded "appmenu:close" was wrong on Ubuntu.
+                for schema, key in TOUCH_KEYS:
+                    subprocess.run(["gsettings", "reset", schema, key], check=False)
 
                 # 4. Disable GNOME Shell extension
                 subprocess.run(["gnome-extensions", "disable", uuid], check=False)
@@ -213,6 +238,10 @@ class DesktopService:
                 if uuid in enabled_list:
                     enabled_list.remove(uuid)
                     subprocess.run(["gsettings", "set", "org.gnome.shell", "enabled-extensions", str(enabled_list).replace('"', "'")], check=False)
+
+                # Remove the copied extension so nothing of it is left behind.
+                if dest.exists() and dest.name == uuid:
+                    shutil.rmtree(dest, ignore_errors=True)
 
                 # 5. Strip GTK CSS
                 for p in (p4, p3):
@@ -252,9 +281,51 @@ class DesktopService:
             "all_ok": dm and wp and grid
         }
 
+    @staticmethod
+    def has_visuals_backup() -> bool:
+        return VISUALS_BACKUP_PATH.exists()
+
+    @staticmethod
+    def _save_visuals_backup() -> None:
+        """Remember the user's look once, before SUIT changes it the first time."""
+        if VISUALS_BACKUP_PATH.exists():
+            return
+        data = {f"{schema} {key}": _gsettings_get(schema, key) for schema, key in VISUAL_KEYS}
+        for folder in ("System", "Utilities"):
+            data[f"folder {folder} apps"] = _gsettings_get(APP_FOLDER_SCHEMA + folder + "/", "apps")
+        VISUALS_BACKUP_PATH.parent.mkdir(parents=True, exist_ok=True)
+        VISUALS_BACKUP_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    @classmethod
+    def restore_desktop_visuals(cls) -> tuple[bool, str]:
+        """Undo "Apply Theme": the saved previous look, else the distro defaults."""
+        try:
+            data = {}
+            if VISUALS_BACKUP_PATH.exists():
+                data = json.loads(VISUALS_BACKUP_PATH.read_text(encoding="utf-8"))
+            for schema, key in VISUAL_KEYS:
+                value = data.get(f"{schema} {key}")
+                cmd = ["gsettings", "set", schema, key, value] if value else ["gsettings", "reset", schema, key]
+                subprocess.run(cmd, check=False)
+            for folder in ("System", "Utilities"):
+                path = APP_FOLDER_SCHEMA + folder + "/"
+                value = data.get(f"folder {folder} apps")
+                cmd = ["gsettings", "set", path, "apps", value] if value else ["gsettings", "reset", path, "apps"]
+                subprocess.run(cmd, check=False)
+            subprocess.run(["gsettings", "reset", APP_FOLDER_SCHEMA + "System/", "name"], check=False)
+            subprocess.run(["gsettings", "reset", APP_FOLDER_SCHEMA + "System/", "translate"], check=False)
+            VISUALS_BACKUP_PATH.unlink(missing_ok=True)
+            SUIT_WALLPAPER_INSTALLED.unlink(missing_ok=True)
+            logger.info("Desktop visuals restored")
+            return True, "Previous wallpaper, theme and App Grid restored."
+        except Exception as e:
+            logger.exception("Failed restoring desktop visuals")
+            return False, f"Failed restoring visuals: {e}"
+
     @classmethod
     def apply_desktop_visuals(cls) -> tuple[bool, str]:
         try:
+            DesktopService._save_visuals_backup()
             # 1. Wallpaper — install bundled asset to stable user path, then apply
             SUIT_WALLPAPER_INSTALLED.parent.mkdir(parents=True, exist_ok=True)
             if SUIT_WALLPAPER_ASSET.exists():

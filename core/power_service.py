@@ -2,13 +2,26 @@ import subprocess
 import shutil
 import re
 from core.package_manager import distribution_id
-from core.admin import admin_prefix
+from core.admin import run_helper
 from pathlib import Path
 from core.logger import get_logger
 
 logger = get_logger("power")
 
 DEFAULT_GDM_CONFIG = Path("/etc/gdm3/custom.conf") if distribution_id() == "ubuntu" else Path("/etc/gdm/custom.conf")
+LEGACY_LOGIND_DROPIN = Path("/etc/systemd/logind.conf.d/99-suit-power.conf")
+
+# GNOME keys SUIT changes for "Display Always On". Restoring uses
+# `gsettings reset` so each distro gets its own default back (Ubuntu and
+# Fedora differ, e.g. Ubuntu's idle-delay is 300, not 900).
+POWER_KEYS = [
+    ("org.gnome.desktop.session", "idle-delay"),
+    ("org.gnome.settings-daemon.plugins.power", "idle-dim"),
+    ("org.gnome.settings-daemon.plugins.power", "sleep-inactive-ac-type"),
+    ("org.gnome.settings-daemon.plugins.power", "sleep-inactive-battery-type"),
+    ("org.gnome.settings-daemon.plugins.power", "power-button-action"),
+    ("org.gnome.desktop.screensaver", "lock-enabled"),
+]
 
 
 class PowerService:
@@ -19,6 +32,18 @@ class PowerService:
     @staticmethod
     def is_blanking_disabled() -> bool:
         return PowerService.is_power_and_sleep_optimized()
+
+    @staticmethod
+    def available_power_profiles() -> list[str]:
+        """Profiles power-profiles-daemon offers on this CPU ("performance" is
+        missing on many machines)."""
+        if not shutil.which("powerprofilesctl"):
+            return []
+        try:
+            res = subprocess.run(["powerprofilesctl", "list"], capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        return re.findall(r"^[ *]*([a-z-]+):\s*$", res.stdout, flags=re.MULTILINE)
 
     @staticmethod
     def is_performance_profile_active(profile: str = "throughput-performance") -> bool:
@@ -32,18 +57,39 @@ class PowerService:
             logger.debug("Failed checking tuned-adm active profile")
             return False
 
-    @staticmethod
-    def set_performance_profile(profile: str = "throughput-performance") -> bool:
+    @classmethod
+    def set_performance_profile(cls, profile: str = "throughput-performance") -> bool:
         try:
             if distribution_id() == "ubuntu" and shutil.which("powerprofilesctl"):
+                available = cls.available_power_profiles()
+                if available and "performance" not in available:
+                    logger.warning("CPU offers no 'performance' profile (available: %s)", ", ".join(available))
+                    return False
                 subprocess.run(["powerprofilesctl", "set", "performance"], check=True, capture_output=True)
             else:
                 subprocess.run(["sudo", "-n", "tuned-adm", "profile", profile], check=True, capture_output=True)
             logger.info("Set system performance profile")
             return True
         except Exception:
-            logger.exception(f"Failed setting tuned-adm profile to {profile}")
+            logger.exception(f"Failed setting performance profile to {profile}")
             return False
+
+    @classmethod
+    def restore_default_profile(cls) -> tuple[bool, str]:
+        """Back to the distro default: 'balanced' (Ubuntu) / tuned's recommendation (Fedora)."""
+        try:
+            if shutil.which("powerprofilesctl"):
+                subprocess.run(["powerprofilesctl", "set", "balanced"], check=True, capture_output=True)
+                return True, "Power profile restored to Balanced."
+            if shutil.which("tuned-adm"):
+                res = subprocess.run(["tuned-adm", "recommend"], capture_output=True, text=True)
+                rec = res.stdout.strip() or "balanced"
+                subprocess.run(["sudo", "-n", "tuned-adm", "profile", rec], check=True, capture_output=True)
+                return True, f"Power profile restored to {rec}."
+        except Exception as exc:
+            logger.exception("Failed restoring default power profile")
+            return False, f"Could not restore power profile: {exc}"
+        return False, "No power profile tool found."
 
     @staticmethod
     def is_power_and_sleep_optimized() -> bool:
@@ -71,12 +117,14 @@ class PowerService:
                 subprocess.run(["gsettings", "set", "org.gnome.settings-daemon.plugins.power", "sleep-inactive-ac-type", "'nothing'"], check=True)
                 subprocess.run(["gsettings", "set", "org.gnome.settings-daemon.plugins.power", "sleep-inactive-battery-type", "'nothing'"], check=True)
                 subprocess.run(["gsettings", "set", "org.gnome.settings-daemon.plugins.power", "power-button-action", "'interactive'"], check=True)
-                subprocess.run(["sudo", "-n", "rm", "-f", "/etc/systemd/logind.conf.d/99-suit-power.conf"], check=False)
+                # No lock screen popping up over the kiosk after idle/resume.
+                subprocess.run(["gsettings", "set", "org.gnome.desktop.screensaver", "lock-enabled", "false"], check=False)
+                # Old SUIT versions wrote this drop-in; only ask for rights if it exists.
+                if LEGACY_LOGIND_DROPIN.exists():
+                    run_helper(["logind-clear"])
             else:
-                subprocess.run(["gsettings", "set", "org.gnome.desktop.session", "idle-delay", "900"], check=True)
-                subprocess.run(["gsettings", "set", "org.gnome.settings-daemon.plugins.power", "idle-dim", "true"], check=True)
-                subprocess.run(["gsettings", "set", "org.gnome.settings-daemon.plugins.power", "sleep-inactive-ac-type", "'suspend'"], check=True)
-                subprocess.run(["gsettings", "set", "org.gnome.settings-daemon.plugins.power", "sleep-inactive-battery-type", "'suspend'"], check=True)
+                for schema, key in POWER_KEYS:
+                    subprocess.run(["gsettings", "reset", schema, key], check=True)
             logger.info(f"Configured power and sleep settings: disable_sleep={disable_sleep}")
             return True
         except Exception:
@@ -139,11 +187,19 @@ class PowerService:
     def set_auto_login(cls, enabled: bool, user: str, config_path: Path | None = None) -> bool:
         target_path = config_path or DEFAULT_GDM_CONFIG
         try:
-            new_content = cls.generate_gdm_config(target_path, enabled, user)
-            subprocess.run(
-                [*admin_prefix(), "tee", str(target_path)],
-                input=new_content, text=True, capture_output=True, check=True
-            )
+            if config_path is not None:
+                # Tests / custom targets: plain write, no privileges involved.
+                target_path.write_text(cls.generate_gdm_config(target_path, enabled, user), encoding="utf-8")
+                return True
+            current, current_user = cls.is_auto_login_enabled(target_path)
+            if current == enabled and (not enabled or current_user == user):
+                return True  # already as requested: no password prompt
+            args = ["gdm-autologin", "--config", str(target_path),
+                    "--enable" if enabled else "--disable", "--user", user or ""]
+            ok, msg = run_helper(args)
+            if not ok:
+                logger.warning("GDM auto-login not changed: %s", msg)
+                return False
             logger.info(f"Updated GDM auto-login to enabled={enabled} for user {user}")
             return True
         except Exception:
