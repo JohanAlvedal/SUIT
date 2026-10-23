@@ -77,9 +77,11 @@ support is merged upstream, continue using this fork's development branch.
 ## Optional uninstall tool (from upstream)
 
 The repository now includes `./uninstall.sh` for deliberate, manual removal.
-Do **not** run it as part of upgrading or testing Ubuntu support: it can remove
-background services and launchers. Review its changes and back up configuration
-before using it. The `--purge` mode also deletes saved settings.
+Run it from a terminal on the dartboard PC's desktop. It removes SUIT's
+services, launchers, helper and touch rule, restores the desktop settings SUIT
+changed (theme, touch tweaks, display sleep, power profile) and asks before
+turning off automatic login or resetting the screen rotation. Autodarts itself
+is never touched. The `--purge` mode also deletes saved settings.
 
 ## Legacy SUIT installations
 
