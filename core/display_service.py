@@ -10,7 +10,8 @@ gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
 from gi.repository import Gio, GLib
 from core.logger import get_logger
-from core.admin import admin_prefix
+from core.admin import run_helper
+from core.suit_helper import udev_rule_text
 
 logger = get_logger("display")
 
@@ -306,101 +307,64 @@ class DisplayService:
         return sorted(list(touchscreens))
 
     @staticmethod
-    def write_udev_rule(touch_device_name: str | None, matrix_str: str | None) -> bool:
-        try:
-            if not touch_device_name or touch_device_name == "None" or not matrix_str:
-                subprocess.run([*admin_prefix(), "rm", "-f", UDEV_RULE_PATH], capture_output=True, check=True)
-                subprocess.run([*admin_prefix(), "udevadm", "control", "--reload-rules"], capture_output=True, check=True)
-                # Trigger input subsystem re-evaluation so stale LIBINPUT_CALIBRATION_MATRIX
-                # entries in /run/udev/data/ are cleared for already-connected devices.
-                subprocess.run(
-                    [*admin_prefix(), "udevadm", "trigger", "--subsystem-match=input"],
-                    capture_output=True,
-                    check=True,
-                )
-                logger.info("Cleared touch calibration udev rule")
-                return True
-
-            resolved_name = DisplayService._resolve_touch_device_name(touch_device_name)
-            udev_rule = (
-                f'ACTION=="add|change", KERNEL=="event*", '
-                f'ATTRS{{name}}=="{resolved_name}", '
-                f'ENV{{LIBINPUT_CALIBRATION_MATRIX}}="{matrix_str}"\n'
-            )
-            subprocess.run(
-                [*admin_prefix(), "tee", UDEV_RULE_PATH],
-                input=udev_rule,
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            subprocess.run(
-                [*admin_prefix(), "udevadm", "control", "--reload-rules"],
-                capture_output=True,
-                check=True,
-            )
-            subprocess.run(
-                [*admin_prefix(), "udevadm", "trigger", "--subsystem-match=input"],
-                capture_output=True,
-                check=True,
-            )
-            logger.info(f"Wrote touch calibration rule for {resolved_name}: {matrix_str}")
-            return True
-        except Exception:
-            logger.exception("Failed writing udev touch rule")
-            return False
+    def find_usb_busid(touch_device_name: str | None) -> str | None:
+        """USB bus id (e.g. "1-4.2") of the touchscreen, used for unbind/bind."""
+        if not touch_device_name or touch_device_name == "None":
+            return None
+        resolved_name = DisplayService._resolve_touch_device_name(touch_device_name)
+        target_norm = resolved_name.strip().lower().replace("_", " ")
+        for name_file in glob.glob("/sys/class/input/input*/name"):
+            try:
+                with open(name_file, "r") as f:
+                    file_norm = f.read().strip().lower().replace("_", " ")
+                if target_norm in file_norm or file_norm in target_norm:
+                    cur = Path(name_file).resolve().parent
+                    while cur != Path("/"):
+                        if (cur / "idVendor").exists() and (cur / "busnum").exists():
+                            return cur.name
+                        cur = cur.parent
+            except Exception:
+                continue
+        return None
 
     @staticmethod
-    def rebind_usb_touch(touch_device_name: str) -> bool:
-        """Force libinput to re-read LIBINPUT_CALIBRATION_MATRIX by USB rebind.
+    def write_udev_rule(
+        touch_device_name: str | None,
+        matrix_str: str | None,
+        rebind_device: str | None = None,
+        interactive: bool = True,
+        rule_path: Path | None = None,
+    ) -> bool:
+        """Write or clear the touch calibration rule in ONE privileged step.
 
-        libinput only reads LIBINPUT_CALIBRATION_MATRIX when the device is first
-        opened. udevadm trigger --action=change updates the DB but has no effect
-        on already-open devices. USB unbind/bind forces libinput to close and
-        reopen the device, picking up the new udev property.
-
-        Call this AFTER the Mutter rotation has been applied so the display
-        transition completes before the touch device momentarily disconnects.
+        The rule, udev reload/trigger and the optional USB unbind/bind run in a
+        single helper call: one password prompt instead of up to five, and the
+        touchscreen is never left unbound waiting for a second dialog.
+        No-op (no prompt) when the rule is already in the requested state.
         """
-        if not touch_device_name or touch_device_name == "None":
-            return False
+        path = rule_path or Path(UDEV_RULE_PATH)
+        busid = DisplayService.find_usb_busid(rebind_device) if rebind_device else None
         try:
-            resolved_name = DisplayService._resolve_touch_device_name(touch_device_name)
-            target_norm = resolved_name.strip().lower().replace("_", " ")
-            bus_id = None
-            for name_file in glob.glob("/sys/class/input/input*/name"):
-                try:
-                    with open(name_file, "r") as f:
-                        file_norm = f.read().strip().lower().replace("_", " ")
-                    if target_norm in file_norm or file_norm in target_norm:
-                        cur = Path(name_file).resolve().parent
-                        while cur != Path("/"):
-                            if (cur / "idVendor").exists() and (cur / "busnum").exists():
-                                bus_id = cur.name
-                                break
-                            cur = cur.parent
-                        if bus_id:
-                            break
-                except Exception:
-                    continue
-
-            if bus_id:
-                logger.info(f"Rebinding USB touch device {bus_id} to apply calibration matrix")
-                subprocess.run(
-                    [*admin_prefix(), "tee", "/sys/bus/usb/drivers/usb/unbind"],
-                    input=f"{bus_id}\n", text=True, capture_output=True, check=True,
-                )
-                time.sleep(1.0)
-                subprocess.run(
-                    [*admin_prefix(), "tee", "/sys/bus/usb/drivers/usb/bind"],
-                    input=f"{bus_id}\n", text=True, capture_output=True, check=True,
-                )
-                return True
+            if not touch_device_name or touch_device_name == "None" or not matrix_str:
+                if not path.exists():
+                    return True
+                args = ["touch-clear"]
             else:
-                logger.debug(f"Could not locate USB bus ID for touch device: {touch_device_name}")
-                return False
+                resolved_name = DisplayService._resolve_touch_device_name(touch_device_name)
+                desired = udev_rule_text(resolved_name, matrix_str)
+                if path.exists() and path.read_text(encoding="utf-8") == desired:
+                    return True
+                args = ["touch-apply", "--name", resolved_name, "--matrix", matrix_str]
+            if busid:
+                args += ["--rebind", busid]
+            ok, msg = run_helper(args, interactive=interactive)
+            if ok:
+                logger.info("Touch calibration: %s", msg)
+            else:
+                logger.warning("Touch calibration not changed: %s", msg)
+            return ok
         except Exception:
-            logger.exception("Failed rebinding USB touch device")
+            logger.exception("Failed writing udev touch rule")
             return False
 
     @classmethod
@@ -409,14 +373,14 @@ class DisplayService:
         touch_device_name: str,
         connector_name: str,
         rotation_int: int | None = None,
-        prev_touch_device_name: str | None = None
+        prev_touch_device_name: str | None = None,
+        interactive: bool = True,
     ) -> bool:
         if not touch_device_name or touch_device_name == "None" or normalize_rotation(rotation_int) == 0:
-            cls.write_udev_rule(None, None)
             target_dev = touch_device_name if touch_device_name and touch_device_name != "None" else prev_touch_device_name
-            if target_dev and target_dev not in ("None", "", None):
-                cls.rebind_usb_touch(target_dev)
-            return True
+            if target_dev in ("None", ""):
+                target_dev = None
+            return cls.write_udev_rule(None, None, rebind_device=target_dev, interactive=interactive)
 
         state = cls.get_current_mutter_state()
         if not state:
@@ -433,10 +397,8 @@ class DisplayService:
         if not matrix_str:
             return False
 
-        ok = cls.write_udev_rule(touch_device_name, matrix_str)
-        if ok:
-            cls.rebind_usb_touch(touch_device_name)
-        return ok
+        return cls.write_udev_rule(touch_device_name, matrix_str,
+                                   rebind_device=touch_device_name, interactive=interactive)
 
     @classmethod
     def load_config(cls, config_path: Path | None = None) -> dict:
@@ -636,9 +598,11 @@ Comment=Maintain screen and touch rotation on boot
 
         touch_dev = touch_device_name if touch_device_name != "None" else None
         rebind_dev = touch_dev or prev_touch_device_name  # device whose calibration needs refresh
+        if rebind_dev in ("None", ""):
+            rebind_dev = None
 
-        # 1. Write udev rule with new calibration matrix (does NOT yet affect libinput).
-        #    At 0° (normal), clear any existing rule so libinput uses its native default.
+        # 1. Calculate the touch matrix for the target rotation before rotating.
+        matrix_str = None
         if touch_dev and normalize_rotation(rotation_int) != 0:
             state = cls.get_current_mutter_state()
             if state:
@@ -646,22 +610,20 @@ Comment=Maintain screen and touch rotation on boot
                 matrix_str = calculate_affine_matrix(
                     logical_monitors, monitors, connector_name, target_trans=rotation_int
                 )
-                if matrix_str:
-                    cls.write_udev_rule(touch_dev, matrix_str)
-                    logger.info(f"Wrote touch calibration rule for {touch_dev}: {matrix_str}")
-        else:
-            cls.write_udev_rule(None, None)
 
         # 2. Rotate display via Mutter DBus (method 1=temporary, 2=persistent)
         actual_method = method if method is not None else (2 if persist else 1)
         rot_ok = cls.apply_rotation(connector_name, rotation_int, method=actual_method)
 
-        # 3. USB rebind — forces libinput to close+reopen the device so it picks
-        #    up the new LIBINPUT_CALIBRATION_MATRIX. Short sleep lets Mutter finish
-        #    the rotation animation before the input device disconnects momentarily.
-        if rebind_dev and rebind_dev not in ("None", ""):
-            time.sleep(0.6)
-            cls.rebind_usb_touch(rebind_dev)
+        # 3. Rule + udev reload + USB rebind in ONE privileged step (the helper
+        #    waits for the rotation animation before the device drops). At 0°
+        #    the rule is cleared so libinput uses its native default.
+        if matrix_str:
+            cls.write_udev_rule(touch_dev, matrix_str, rebind_device=rebind_dev)
+        elif not touch_dev or normalize_rotation(rotation_int) == 0:
+            cls.write_udev_rule(None, None, rebind_device=rebind_dev)
+        else:
+            logger.warning("No Mutter state: touch calibration left unchanged")
 
         # 4. Persist configuration if requested
         if persist:
@@ -759,14 +721,19 @@ Comment=Maintain screen and touch rotation on boot
         for mon_name, settings in config.items():
             touch = settings.get("touch_device")
             target_rot = normalize_rotation(settings.get("rotation", 0))
+            # Never show a password dialog at login: it would sit behind the
+            # kiosk window. Only fix the rule if that works without a prompt;
+            # otherwise log it so the user can re-apply from SUIT.
             if touch and touch != "None" and target_rot != 0:
                 if not udev_path.exists():
-                    logger.info("Udev rule missing on boot; writing and rebinding")
-                    cls.apply_touch_calibration(touch, mon_name, rotation_int=target_rot)
+                    logger.info("Udev rule missing on boot; writing and rebinding if possible without a prompt")
+                    if not cls.apply_touch_calibration(touch, mon_name, rotation_int=target_rot, interactive=False):
+                        logger.warning("Touch calibration rule missing; re-apply rotation in SUIT")
             else:
                 if udev_path.exists():
-                    logger.info("Udev rule found when none expected; clearing")
-                    cls.write_udev_rule(None, None)
+                    logger.info("Udev rule found when none expected; clearing if possible without a prompt")
+                    if not cls.write_udev_rule(None, None, interactive=False):
+                        logger.warning("Stale touch calibration rule left in place; reset rotation in SUIT")
             break
 
         return True
