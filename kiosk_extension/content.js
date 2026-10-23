@@ -293,10 +293,18 @@
         }
       };
 
-      // Try default port 3180 first, fallback to 3182
-      fetch("http://localhost:3180/api/state", { method: "GET", mode: "no-cors", cache: "no-cache" })
-        .then(() => openConfigUrl("http://localhost:3180/config"))
-        .catch(() => openConfigUrl("http://localhost:3182/config"));
+      // The port probe runs in the extension's service worker: a fetch from
+      // play.autodarts.com to localhost is blocked or prompts under Chromium's
+      // Local Network Access rules, which made this always pick 3182.
+      try {
+        chrome.runtime.sendMessage({ action: "open_board_config" }, (resp) => {
+          if (chrome.runtime.lastError || !resp || resp.status !== "ok") {
+            openConfigUrl("http://localhost:3180/config");
+          }
+        });
+      } catch (e) {
+        openConfigUrl("http://localhost:3180/config");
+      }
     });
 
     const lightBtn = document.getElementById("suit-item-light");
