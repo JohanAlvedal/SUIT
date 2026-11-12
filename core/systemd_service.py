@@ -1,6 +1,7 @@
 import atexit
 import time
 import subprocess
+from core.admin import run_helper
 import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
@@ -125,8 +126,15 @@ class SystemdService:
                 pass
 
         try:
-            cmd = ["systemctl", "--user", "reset-failed", unit_name] if target_scope == "user" else ["sudo", "systemctl", "reset-failed", unit_name]
-            subprocess.run(cmd, capture_output=True, timeout=5)
+            if target_scope == "user":
+                subprocess.run(["systemctl", "--user", "reset-failed", unit_name], capture_output=True, timeout=5)
+            else:
+                # System unit (e.g. a kept legacy Autodarts install). Optional
+                # step, so never an extra password dialog for it.
+                ok, msg = run_helper(["unit", "reset-failed", unit_name], interactive=False)
+                if not ok:
+                    logger.debug("reset-failed %s skipped: %s", unit_name, msg)
+                    return False
             logger.info(f"Reset failed state for {unit_name} via {target_scope} systemctl")
             return True
         except Exception:
@@ -163,10 +171,16 @@ class SystemdService:
 
         # Fallback to systemctl CLI
         try:
-            if target_scope == "user":
-                cmd = ["systemctl", "--user", action, unit_name]
-            else:
-                cmd = ["sudo", "systemctl", action, unit_name]
+            if target_scope != "user":
+                # No passwordless sudo on Ubuntu: one validated helper call
+                # (Autodarts units only) behind the SUIT polkit action.
+                ok, msg = run_helper(["unit", action, unit_name])
+                if ok:
+                    logger.info(f"Successfully executed {action} for {unit_name} via SUIT helper")
+                else:
+                    logger.error(f"system {action} {unit_name} failed: {msg}")
+                return ok
+            cmd = ["systemctl", "--user", action, unit_name]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if res.returncode == 0:
                 logger.info(f"Successfully executed {action} for {unit_name} via {target_scope} systemctl")

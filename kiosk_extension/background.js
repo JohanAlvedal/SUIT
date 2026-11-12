@@ -34,6 +34,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "open_board_config") {
+    findBoardConfigUrl().then((url) => {
+      chrome.tabs.create({ url }, (tab) => {
+        sendResponse({ status: "ok", url, tabId: tab ? tab.id : null });
+      });
+    });
+    return true;
+  }
+
   // 2. System operations. Ubuntu/Chromium Snap: localhost bridge (native
   // messaging is sandboxed there). Fedora: native messaging as before.
   getBridgeConfig().then((bridge) => {
@@ -94,4 +103,22 @@ function callNativeHost(request, sendResponse) {
     console.error("Failed sending native message:", err);
     sendResponse({ status: "error", error: String(err) });
   }
+}
+
+// Autodarts board manager: 3180 by default, 3182 on some installs. Probed
+// from the service worker (covered by host_permissions), not from the page.
+async function findBoardConfigUrl() {
+  for (const port of [3180, 3182]) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    try {
+      await fetch(`http://127.0.0.1:${port}/api/state`, { cache: "no-store", signal: controller.signal });
+      return `http://localhost:${port}/config`;
+    } catch (err) {
+      // closed port or timeout: try the next one
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return "http://localhost:3180/config";
 }

@@ -68,7 +68,23 @@ passwordless sudo. No root account or global Python pip installation is needed.
 - Ubuntu package-removal/"debloat" and automatic Waydroid setup are disabled
   pending a package and platform review.
 - Passwordless sudo is never automatically provisioned in this fork.
-- Explicit administrator changes request Polkit authorization; touch calibration still needs hardware validation.
+- Administrator changes go through one small helper, `/usr/libexec/suit/suit-helper`
+  (installed by `install.sh`, polkit action `se.alvedal.suit.helper`). It only
+  knows a few validated verbs: touch calibration (rule + udev reload + USB
+  rebind in one step), automatic login, Autodarts system units and removing a
+  legacy logind drop-in. One password prompt per operation, remembered for a
+  few minutes. Before `install.sh` has been rerun SUIT falls back to running
+  the checkout's copy through `pkexec` - still one prompt per operation.
+  Touch calibration still needs hardware validation.
+- No password dialogs at login: the rotation autostart only fixes the touch
+  rule if that works without a prompt, otherwise it logs a warning.
+- **Restore** puts back the system's own defaults (`gsettings reset`), not
+  Fedora's: touch tweaks off, display sleep, lock screen, power profile
+  (Balanced) and theme (the previous wallpaper/theme/App Grid are saved before
+  the first "Apply Theme"). Keyring resets keep timestamped backups in
+  `~/.local/share/keyrings/` that can be restored from the Keyring row.
+- `./uninstall.sh` restores those settings too and asks before turning off
+  automatic login or resetting the screen rotation.
 - Adding the controls to *every* Chromium window (`/etc/chromium`) stays Fedora-only;
   on Ubuntu they are loaded by the kiosk launch only.
 - An app update uses a fast-forward only on the **current checked-out branch**;
@@ -84,6 +100,10 @@ passwordless sudo. No root account or global Python pip installation is needed.
 4. Check manual package installation authorizations and browser kiosk behavior.
 5. Verify no unexpected sudoers rules, old service removals or keyring resets.
 6. Only then test optional startup or login settings, with a backup available.
+7. Restore checks: rotate the screen and **Revert** with touch only (one
+   prompt, touch must work afterwards); touch tweaks off (Ubuntu keeps
+   minimize/maximize buttons); "Restore" on theme and power profile; Board
+   config button in the kiosk opens the right port.
 
 ## Fedora installation
 

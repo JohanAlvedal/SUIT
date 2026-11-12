@@ -352,6 +352,30 @@ class SystemService:
     def apply_desktop_visuals(cls) -> tuple[bool, str]:
         return DesktopService.apply_desktop_visuals.__func__(cls)
 
+    @staticmethod
+    def restore_desktop_visuals() -> tuple[bool, str]:
+        return DesktopService.restore_desktop_visuals()
+
+    @staticmethod
+    def list_keyring_backups() -> list:
+        return KeyringService.list_keyring_backups()
+
+    @staticmethod
+    def restore_keyring_backup(backup=None) -> tuple[bool, str]:
+        return KeyringService.restore_keyring_backup(backup)
+
+    @staticmethod
+    def has_visuals_backup() -> bool:
+        return DesktopService.has_visuals_backup()
+
+    @staticmethod
+    def restore_default_profile() -> tuple[bool, str]:
+        return PowerService.restore_default_profile()
+
+    @staticmethod
+    def available_power_profiles() -> list[str]:
+        return PowerService.available_power_profiles()
+
     # --- RemoteDesktopService delegation ---
     @staticmethod
     def get_local_ip() -> str:

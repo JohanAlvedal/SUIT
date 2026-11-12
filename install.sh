@@ -32,6 +32,7 @@ esac
 echo "SUIT setup for ${PRETTY_NAME} (${DISTRO})"
 if [[ "${1:-}" == "--check" ]]; then
   echo "Read-only check: planned packages: ${PACKAGES[*]}"
+  echo "Would install: /usr/libexec/suit/suit-helper and polkit action se.alvedal.suit.helper"
   echo "The legacy uninstaller is never run automatically."
   exit 0
 fi
@@ -40,7 +41,7 @@ if [[ $# -ne 0 ]]; then
   exit 2
 fi
 
-# Package installation is the only privileged action performed by this script.
+# Privileged actions here: package installation and the SUIT helper + polkit action.
 # Do not run the legacy uninstaller or change sudoers, login or keyring settings.
 if [[ "$DISTRO" == "ubuntu" ]]; then
   sudo apt-get update
@@ -48,6 +49,14 @@ if [[ "$DISTRO" == "ubuntu" ]]; then
 else
   sudo dnf install -y --setopt=install_weak_deps=False "${PACKAGES[@]}"
 fi
+
+# Privileged helper: a fixed set of validated root actions behind one polkit
+# action (one password prompt per operation, remembered for a few minutes).
+# Replaces upstream's NOPASSWD sudoers rule. Root-owned copy, so the
+# user-writable checkout is never executed as root through this action.
+sudo install -D -o root -g root -m 0755 "$ROOT/core/suit_helper.py" /usr/libexec/suit/suit-helper
+sudo install -D -o root -g root -m 0644 "$ROOT/assets/polkit/se.alvedal.suit.helper.policy" \
+  /usr/share/polkit-1/actions/se.alvedal.suit.helper.policy
 
 python3 "$ROOT/create_launcher.py"
 

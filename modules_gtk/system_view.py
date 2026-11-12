@@ -128,6 +128,15 @@ class SystemView(Adw.NavigationPage):
         self.lbl_profile_status = Gtk.Label(label="Checking...")
         self.lbl_profile_status.add_css_class("dim-label")
         self.row_profile.add_suffix(self.lbl_profile_status)
+        self.btn_profile_action = create_button_with_icon(
+            "power-profile-performance-symbolic",
+            "Performance",
+            "suggested-action compact-btn",
+            height=34
+        )
+        self.btn_profile_action.set_valign(Gtk.Align.CENTER)
+        self.btn_profile_action.connect("clicked", self._on_profile_action_clicked)
+        self.row_profile.add_suffix(self.btn_profile_action)
         self.grp_system.add(self.row_profile)
 
         # 2. Automatic Login Switch
@@ -182,6 +191,13 @@ class SystemView(Adw.NavigationPage):
             height=34
         )
         self.btn_visuals_action.connect("clicked", self._on_visuals_action_clicked)
+        self.btn_visuals_restore = create_button_with_icon(
+            "edit-undo-symbolic",
+            "Restore",
+            "secondary-btn compact-btn",
+            height=34
+        )
+        self.btn_visuals_restore.connect("clicked", self._on_visuals_restore_clicked)
         self.box_visuals.append(self.lbl_visuals_badge)
         self.row_visuals.add_suffix(self.box_visuals)
         self.grp_system.add(self.row_visuals)
@@ -274,7 +290,13 @@ class SystemView(Adw.NavigationPage):
             has_chrom = SystemService.get_software_status().get("chromium", False)
             vis_status = SystemService.get_visuals_status()
             is_touch = SystemService.is_touch_scaling_enabled()
+            profiles = SystemService.available_power_profiles()
+            vis_backup = SystemService.has_visuals_backup()
+            kr_backups = SystemService.list_keyring_backups()
             return {
+                "profiles": profiles,
+                "vis_backup": vis_backup,
+                "kr_backups": kr_backups,
                 "status": status,
                 "keyring": (is_blank, reason, seahorse_installed),
                 "bloat": bloat,
@@ -320,6 +342,22 @@ class SystemView(Adw.NavigationPage):
 
                 prof_text = "Active: Performance" if status["profile_ok"] else "Active: Default/Powersave"
                 self.lbl_profile_status.set_label(prof_text)
+                profiles = data.get("profiles", [])
+                self._profile_is_performance = status["profile_ok"]
+                if status["profile_ok"]:
+                    self._set_button_label(self.btn_profile_action, "edit-undo-symbolic", "Restore", primary=False)
+                    self.btn_profile_action.set_sensitive(True)
+                    self.row_profile.set_subtitle("Locks CPU to maximum performance.")
+                elif profiles and "performance" not in profiles:
+                    self._set_button_label(self.btn_profile_action, "power-profile-performance-symbolic", "Performance", primary=True)
+                    self.btn_profile_action.set_sensitive(False)
+                    self.row_profile.set_subtitle(
+                        "This CPU has no performance profile (available: " + ", ".join(profiles) + ")."
+                    )
+                else:
+                    self._set_button_label(self.btn_profile_action, "power-profile-performance-symbolic", "Performance", primary=True)
+                    self.btn_profile_action.set_sensitive(True)
+                    self.row_profile.set_subtitle("Locks CPU to maximum performance.")
                 self.row_autologin.set_active(status["autologin_ok"])
                 self.row_blanking.set_active(status["power_ok"])
 
@@ -335,6 +373,10 @@ class SystemView(Adw.NavigationPage):
                     self.lbl_keyring_badge.add_css_class("status-pill-running")
                     self.box_keyring.append(self.lbl_keyring_badge)
                     self.row_keyring.set_subtitle("Unlocked on boot.")
+                    self._keyring_backups = data.get("kr_backups", [])
+                    if self._keyring_backups:
+                        self._set_button_label(self.btn_keyring_action, "edit-undo-symbolic", "Restore", primary=False)
+                        self.box_keyring.append(self.btn_keyring_action)
                 else:
                     self.btn_keyring_action.set_child(None)
                     kbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -358,6 +400,7 @@ class SystemView(Adw.NavigationPage):
                     self.lbl_visuals_badge.remove_css_class("status-pill-pending")
                     self.lbl_visuals_badge.add_css_class("status-pill-running")
                     self.box_visuals.append(self.lbl_visuals_badge)
+                    self.box_visuals.append(self.btn_visuals_restore)
                     self.row_visuals.set_subtitle("Dark theme and clean desktop active.")
                 else:
                     self.btn_visuals_action.set_child(None)
@@ -370,6 +413,9 @@ class SystemView(Adw.NavigationPage):
                     self.btn_visuals_action.remove_css_class("secondary-btn")
                     self.btn_visuals_action.add_css_class("suggested-action")
                     self.box_visuals.append(self.btn_visuals_action)
+                    if data.get("vis_backup"):
+                        # Partly applied: still offer the way back.
+                        self.box_visuals.append(self.btn_visuals_restore)
                     self.row_visuals.set_subtitle("Dark theme and wallpaper need setup.")
 
                 # 4. Touchscreen Tweaks Switch
@@ -569,15 +615,19 @@ class SystemView(Adw.NavigationPage):
         is_blank = getattr(self, "_keyring_is_blank", False)
 
         if is_blank:
-            dialog = Adw.AlertDialog(
-                heading="Reset Keyring to Blank Password?",
-                body=(
-                    "Your keyring is already unencrypted and unlocks automatically.\n\n"
-                    "If you choose to reset it, a fresh blank keyring will be created. "
-                    "Existing entries will be backed up to login.keyring.bak."
+            backups = getattr(self, "_keyring_backups", [])
+            body = "Your keyring is already unencrypted and unlocks automatically.\n\n"
+            if backups:
+                body += (
+                    f"Restore puts back the keyring SUIT saved on {self._fmt_mtime(backups[0])}, "
+                    "including its old password and saved entries. The current keyring is backed up first.\n\n"
                 )
-            )
+            body += "Reset creates a fresh blank keyring; the current one is backed up first."
+            dialog = Adw.AlertDialog(heading="Keyring", body=body)
             dialog.add_response("cancel", "Cancel")
+            if backups:
+                dialog.add_response("restore", "Restore Backup")
+                dialog.set_response_appearance("restore", Adw.ResponseAppearance.SUGGESTED)
             dialog.add_response("reset", "Reset Keyring")
             dialog.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
         else:
@@ -586,7 +636,7 @@ class SystemView(Adw.NavigationPage):
                 body=(
                     "This automatically sets the login keyring to a blank password so it unlocks "
                     "without prompting on boot.\n\n"
-                    "Existing keyring entries will be backed up to login.keyring.bak.\n\n"
+                    "The existing keyring is backed up first and can be restored later.\n\n"
                     "If you have personal saved passwords to preserve, choose 'Manual (Seahorse)' instead."
                 )
             )
@@ -610,6 +660,15 @@ class SystemView(Adw.NavigationPage):
                     self.refresh()
 
                 run_async(worker, on_done=on_done)
+            elif resp == "restore":
+                self.btn_keyring_action.set_sensitive(False)
+
+                def restore_done(res):
+                    self.btn_keyring_action.set_sensitive(True)
+                    self.window.show_toast(res[1])
+                    self.refresh()
+
+                run_async(SystemService.restore_keyring_backup, on_done=restore_done)
             elif resp == "seahorse":
                 self._open_seahorse_guide()
 
@@ -661,6 +720,57 @@ class SystemView(Adw.NavigationPage):
             self.refresh()
 
         run_async(worker, on_done=on_done)
+
+    @staticmethod
+    def _fmt_mtime(path) -> str:
+        import time as _time
+        try:
+            return _time.strftime("%Y-%m-%d %H:%M", _time.localtime(path.stat().st_mtime))
+        except OSError:
+            return "an earlier date"
+
+    @staticmethod
+    def _set_button_label(btn, icon: str, label: str, primary: bool) -> None:
+        btn.set_child(None)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_valign(Gtk.Align.CENTER)
+        box.append(Gtk.Image.new_from_icon_name(icon))
+        box.append(Gtk.Label(label=label))
+        btn.set_child(box)
+        if primary:
+            btn.remove_css_class("secondary-btn")
+            btn.add_css_class("suggested-action")
+        else:
+            btn.remove_css_class("suggested-action")
+            btn.add_css_class("secondary-btn")
+
+    def _on_profile_action_clicked(self, btn):
+        btn.set_sensitive(False)
+        restore = getattr(self, "_profile_is_performance", False)
+
+        def worker():
+            if restore:
+                return SystemService.restore_default_profile()
+            ok = SystemService.set_performance_profile()
+            return ok, ("Performance profile active." if ok else "Could not set performance profile; check suit.log.")
+
+        def on_done(res):
+            btn.set_sensitive(True)
+            self.window.show_toast(res[1])
+            self.refresh()
+
+        run_async(worker, on_done=on_done)
+
+    def _on_visuals_restore_clicked(self, btn):
+        btn.set_sensitive(False)
+
+        def on_done(res):
+            btn.set_sensitive(True)
+            self.window.show_toast(res[1])
+            self.refresh()
+
+        run_async(SystemService.restore_desktop_visuals, on_done=on_done)
 
     def _on_touch_scaling_toggled(self, row, param):
         if self._updating:

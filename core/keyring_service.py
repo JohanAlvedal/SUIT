@@ -62,10 +62,18 @@ class KeyringService:
         try:
             keyring_dir.mkdir(parents=True, exist_ok=True)
 
-            # Backup existing if present
+            # Backup existing if present. Timestamped and never overwritten:
+            # a second reset must not destroy the original password-protected
+            # keyring (the old fixed login.keyring.bak name did exactly that).
             if keyring_path.exists():
-                bak_path = keyring_path.with_suffix(".keyring.bak")
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                bak_path = keyring_dir / f"{keyring_path.stem}.keyring.suit-{stamp}.bak"
+                n = 1
+                while bak_path.exists():
+                    bak_path = keyring_dir / f"{keyring_path.stem}.keyring.suit-{stamp}-{n}.bak"
+                    n += 1
                 shutil.copy2(keyring_path, bak_path)
+                bak_path.chmod(0o600)
                 logger.info(f"Backed up existing keyring to {bak_path}")
 
             blank_content = (
@@ -95,6 +103,41 @@ class KeyringService:
         except Exception as e:
             logger.exception("Failed resetting keyring to blank")
             return False, f"Failed resetting keyring: {e}"
+
+    @staticmethod
+    def list_keyring_backups(keyring_dir: Path | None = None) -> list[Path]:
+        """SUIT keyring backups, newest first (incl. the legacy login.keyring.bak)."""
+        kdir = keyring_dir or (Path.home() / ".local" / "share" / "keyrings")
+        if not kdir.exists():
+            return []
+        found = list(kdir.glob("*.keyring.suit-*.bak"))
+        legacy = kdir / "login.keyring.bak"
+        if legacy.exists():
+            found.append(legacy)
+        return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+
+    @classmethod
+    def restore_keyring_backup(cls, backup: Path | None = None, keyring_dir: Path | None = None) -> tuple[bool, str]:
+        """Put a backed-up login keyring back (it asks for its old password again).
+        The current keyring is backed up first, so this is reversible too."""
+        kdir = keyring_dir or (Path.home() / ".local" / "share" / "keyrings")
+        backups = cls.list_keyring_backups(kdir)
+        source = backup or (backups[0] if backups else None)
+        if not source or not source.exists():
+            return False, "No keyring backup found."
+        target = kdir / "login.keyring"
+        try:
+            if target.exists():
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                shutil.copy2(target, kdir / f"login.keyring.suit-{stamp}-before-restore.bak")
+            shutil.copy2(source, target)
+            target.chmod(0o600)
+            subprocess.run(["killall", "-HUP", "gnome-keyring-daemon"], capture_output=True)
+            logger.info("Restored keyring from %s", source)
+            return True, "Keyring restored. Log out and in again; it uses its old password."
+        except Exception as e:
+            logger.exception("Failed restoring keyring backup")
+            return False, f"Failed restoring keyring: {e}"
 
     @staticmethod
     def is_seahorse_installed() -> bool:
