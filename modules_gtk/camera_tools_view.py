@@ -4,62 +4,19 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 from core.logger import get_logger
 
+from modules_gtk.ui_helpers import build_page_shell
+from core.i18n import tr
+
 logger = get_logger("camera_tools_view")
 
 
 class CameraToolsView(Adw.NavigationPage):
     def __init__(self, window):
-        super().__init__(title="Camera Tools", tag="camera_tools")
+        super().__init__(title=tr("Camera Tools"), tag="camera_tools")
         self.window = window
 
-        # Scrolled container with kinetic touch scrolling
-        scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
-        scrolled.set_kinetic_scrolling(True)
-        scrolled.set_overlay_scrolling(True)
+        scrolled, main_box = build_page_shell()
         self.set_child(scrolled)
-
-        # Responsive clamp
-        clamp = Adw.Clamp(maximum_size=820, tightening_threshold=640)
-        clamp.set_margin_top(6)
-        clamp.set_margin_bottom(8)
-        clamp.set_margin_start(10)
-        clamp.set_margin_end(10)
-        scrolled.set_child(clamp)
-
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        clamp.set_child(main_box)
-
-        # Header description card
-        header_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        header_card.add_css_class("card")
-        header_card.set_margin_bottom(2)
-
-        inner_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        inner_box.set_margin_top(6)
-        inner_box.set_margin_bottom(6)
-        inner_box.set_margin_start(12)
-        inner_box.set_margin_end(12)
-
-        icon_hub = Gtk.Image.new_from_icon_name("camera-photo-symbolic")
-        icon_hub.set_pixel_size(28)
-        icon_hub.set_valign(Gtk.Align.CENTER)
-        inner_box.append(icon_hub)
-
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        text_box.set_valign(Gtk.Align.CENTER)
-        text_box.set_hexpand(True)
-
-        lbl_title = Gtk.Label(label="Camera Tools", xalign=0)
-        lbl_title.add_css_class("title-3")
-        text_box.append(lbl_title)
-
-        lbl_desc = Gtk.Label(label="Optical calibration, sensor exposure, and diagnostic utilities.", xalign=0)
-        lbl_desc.add_css_class("dim-label")
-        text_box.append(lbl_desc)
-
-        inner_box.append(text_box)
-        header_card.append(inner_box)
-        main_box.append(header_card)
 
         # Tools Preferences Group
         self.pref_group = Adw.PreferencesGroup()
@@ -67,8 +24,8 @@ class CameraToolsView(Adw.NavigationPage):
 
         # 1. Focus Calibration Row
         self.row_focus = Adw.ActionRow()
-        self.row_focus.set_title(GLib.markup_escape_text("Focus Calibration"))
-        self.row_focus.set_subtitle(GLib.markup_escape_text("Tune optical sharpness, target sweet spots, and audio tone guidance."))
+        self.row_focus.set_title(GLib.markup_escape_text(tr("Focus Calibration")))
+        self.row_focus.set_subtitle(GLib.markup_escape_text(tr("Tune optical sharpness, target sweet spots, and audio tone guidance.")))
         icon_focus = Gtk.Image.new_from_icon_name("camera-photo-symbolic")
         icon_focus.set_pixel_size(24)
         icon_focus.set_margin_end(10)
@@ -82,10 +39,10 @@ class CameraToolsView(Adw.NavigationPage):
         self.row_focus.add_suffix(chevron_focus)
         self.pref_group.add(self.row_focus)
 
-        # 2. Manual Controls Row
+        # 2. Camera Controls Row
         self.row_manual = Adw.ActionRow()
-        self.row_manual.set_title(GLib.markup_escape_text("Manual Controls"))
-        self.row_manual.set_subtitle(GLib.markup_escape_text("Adjust exposure, gain, brightness, and sensor parameters."))
+        self.row_manual.set_title(GLib.markup_escape_text(tr("Camera Controls")))
+        self.row_manual.set_subtitle(GLib.markup_escape_text(tr("Live view and every camera setting, kept across restarts, with presets.")))
         icon_manual = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
         icon_manual.set_pixel_size(24)
         icon_manual.set_margin_end(10)
@@ -101,8 +58,8 @@ class CameraToolsView(Adw.NavigationPage):
 
         # 3. Camera Optimizer
         self.row_optimizer = Adw.ActionRow()
-        self.row_optimizer.set_title(GLib.markup_escape_text("Camera Optimizer"))
-        self.row_optimizer.set_subtitle(GLib.markup_escape_text("Automated multi-camera exposure, gain, and ISP calibration wizard."))
+        self.row_optimizer.set_title(GLib.markup_escape_text(tr("Camera Optimizer")))
+        self.row_optimizer.set_subtitle(GLib.markup_escape_text(tr("One-click exposure, gain, and JPEG quality calibration for HBV OV2710 cameras.")))
         icon_optimizer = Gtk.Image.new_from_icon_name("applications-science-symbolic")
         icon_optimizer.set_pixel_size(24)
         icon_optimizer.set_margin_end(10)
@@ -110,11 +67,6 @@ class CameraToolsView(Adw.NavigationPage):
         self.row_optimizer.add_prefix(icon_optimizer)
         self.row_optimizer.set_activatable(True)
         self.row_optimizer.connect("activated", lambda *args: self._open_optimizer())
-
-        lbl_badge = Gtk.Label(label="Experimental")
-        lbl_badge.add_css_class("status-pill-experimental")
-        lbl_badge.set_valign(Gtk.Align.CENTER)
-        self.row_optimizer.add_suffix(lbl_badge)
 
         chevron_optimizer = Gtk.Image.new_from_icon_name("go-next-symbolic")
         chevron_optimizer.set_opacity(0.5)
@@ -130,11 +82,11 @@ class CameraToolsView(Adw.NavigationPage):
             self.window.open_focus_page()
 
     def _open_manual(self):
-        logger.debug("Opening Manual Controls tool from Camera Tools hub")
-        if hasattr(self.window, "open_camera_manual_page"):
-            self.window.open_camera_manual_page()
+        logger.debug("Opening Camera Controls from Camera Tools hub")
+        if hasattr(self.window, "open_camera_controls_page"):
+            self.window.open_camera_controls_page()
 
     def _open_optimizer(self):
         logger.debug("Opening Camera Optimizer from Camera Tools hub")
-        if hasattr(self.window, "open_cam_calibration_page"):
-            self.window.open_cam_calibration_page()
+        if hasattr(self.window, "open_camera_optimizer_page"):
+            self.window.open_camera_optimizer_page()

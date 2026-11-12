@@ -45,9 +45,9 @@ cd SUIT
 After installation, launch **SUIT (Autodarts)** from the application menu.
 
 **Important:** The installer does not uninstall the previous SUIT version,
-change sudoers/Polkit policy, disable screen locking, reset keyrings, or change
-Autodarts services. Do not run the optional legacy cleanup script without
-reviewing its consequences.
+change sudoers, disable screen locking, reset keyrings, or change Autodarts
+services. Its only privileged additions are distribution packages and the
+`se.alvedal.suit.helper` Polkit action for SUIT's validated helper.
 
 ### What currently differs between platforms?
 
@@ -61,6 +61,12 @@ reviewing its consequences.
 | System-wide **Apply All** | Upstream workflow | Disabled to prevent unsafe bulk changes |
 | Automatic application removal (debloat) | Upstream workflow | Disabled pending package review |
 | Automatic Waydroid install | Upstream workflow | Disabled pending platform review |
+| Fast Boot (dracut/GRUB/unit masks) | Upstream implementation | Hidden; not ported (initramfs-tools, update-grub) |
+| Minimal Desktop shell extension | Upstream implementation (GNOME 49+) | Available on GNOME 49+ only (Ubuntu 25.10 and newer); disabled on 24.04 |
+| Hardware Overlay shell extension | Upstream implementation | Ported (GNOME 45+); hardware testing pending |
+| AutoGlow 2 Manager | Upstream implementation | Uses one Polkit prompt per privileged step; hardware testing pending |
+| Repair after system upgrade | Upstream workflow (Fedora upgrades) | Not run on Ubuntu |
+| English/German UI | Upstream implementation | Same |
 
 The fork also removes the original broad **passwordless sudo** setup on both
 platforms. Privileged operations may ask for authentication, and some older
@@ -83,13 +89,6 @@ changed (theme, touch tweaks, display sleep, power profile) and asks before
 turning off automatic login or resetting the screen rotation. Autodarts itself
 is never touched. The `--purge` mode also deletes saved settings.
 
-## Legacy SUIT installations
-
-The upstream project includes `uninstall_legacy.sh` for removing older
-background services, touch rules and autostart entries. **It is not executed
-automatically by this installer.** Review the script and back up your
-configuration before choosing to run it.
-
 ---
 
 ## Features & Modes
@@ -101,35 +100,36 @@ Modern Libadwaita touch menu providing rapid access to all system tools and live
   <img src="docs/assets/screenshots/01-main-dashboard.png" alt="SUIT Main Dashboard" width="700">
 </div>
 
-* Large 48px+ touch targets optimized for touchscreens.
+* Large 44px+ touch targets optimized for touchscreens.
 * Quick access to community resources, Discord, and 3D print models.
 * Integrated one-click update checker.
 
 ---
 
 ### 2. System Utilities & Touchscreen Tweaks
-One-click performance, display, and desktop optimizations for dartboard machines.
+One-click performance, display, and desktop optimizations for dartboard machines. The **Essentials** tab holds everything *Apply All* sets up; the **Extras** tab has the optional tweaks (touchscreen tweaks, minimal desktop, Fast Boot, hardware overlay, advanced tools).
 
 <div align="center">
   <img src="docs/assets/screenshots/02-system-tweaks.png" alt="System Utilities and Touchscreen Tweaks" width="700">
 </div>
 
 * **Touchscreen Tweaks**: Enlarges GNOME top bar to 54px, expands button touch padding, enables On-Screen Keyboard (OSK), and restores window Minimize/Maximize buttons across Chromium and desktop apps.
+* **Minimal Desktop**: One switch for a cleaner rig desktop: a dock with your favorite and running apps sits on the wallpaper (windows simply cover it), and top bar icons and quick settings a dart machine never needs (accessibility, microphone, power mode, night light, dark style, do not disturb) are hidden. When AutoGlow 2 is installed, an **Autoglow 2** button next to Wi-Fi opens its web interface.
 * **Performance Profile**: Locks CPU governors to high-performance mode to minimize dart detection latency.
 * **Display Keepalive & Auto-Login**: Bypasses screen blanking, sleep timeouts, and login password prompts.
 
 ---
 
 ### 3. Autodarts Setup
-Manage the Autodarts core service daemon, camera configurations, and board pairing.
+The official Autodarts v2 console, embedded and sized to fit, plus install and maintenance tools.
 
 <div align="center">
   <img src="docs/assets/screenshots/03-autodarts-setup.png" alt="Autodarts Setup" width="700">
 </div>
 
-* One-tap service controls to start, stop, or restart `autodarts.service`.
-* Live camera selection with resolution and frame rate adjustments (up to 1080p, 30 FPS).
-* Direct board pairing wizard and local web UI launcher.
+* Everything from the Autodarts console in one page: board info and sign-in, run as a service, start / stop / reset / calibrate, cameras, resolution, FPS, standby time and detection speed.
+* The console scales its font to the window, so every section is visible without scrolling.
+* **Tools and Maintenance**: restart the console, and reinstall or uninstall Autodarts.
 
 ---
 
@@ -143,7 +143,34 @@ Optical calibration wizard to achieve razor-sharp focus across all 3 Autodarts c
 
 ---
 
-### 5. Screen & Touch Manager
+### 5. Camera Optimizer (HBV OV2710)
+One-click image calibration for HBV OV2710 cameras (USB ID `0bdc:2710`), found under **Camera Tools**.
+
+* **One click**: stops Autodarts, calibrates every camera against the empty board, matches them, and starts Autodarts again (about 2 minutes).
+* **Hidden camera controls**: longest flicker-free exposure at 1× sensor gain, matched digital gain, low sharpening, and a high MJPEG quality picked by a bandwidth check across all cameras. About twice as visible darts in Autodarts' difference image on the reference rig.
+* **Stays applied**: the `suit-camera-keeper` user service writes the settings before Autodarts opens the cameras and re-applies them after restarts and standby. Nothing is flashed; settings live in camera RAM.
+* **Fine-tuning** afterwards on the **Camera Controls** page, with "Reset to calibrated" and a brightness check.
+* **Before and after** comparison per camera, and **Restore original settings** to undo everything.
+
+Only cameras with the HBV USB ID and a verified firmware build are touched; you confirm once that you use HBV OV2710 cameras. Profiles live in `~/.config/hbvcal`.
+
+<p align="center">
+  <img src="docs/assets/screenshots/07-camera-before-after.png" alt="Camera Optimizer before (left) and after (right)" width="420">
+</p>
+
+---
+
+### 6. Camera Controls
+Live view and every setting of each camera, for any UVC camera, found under **Camera Tools**.
+
+* **Every control** grouped by Exposure / Tone / Detail / Color / Stream; on confirmed HBV OV2710 cameras also JPEG quality and sensor gain.
+* **Keep these settings**: per camera, re-applied by the `suit-camera-keeper` service before Autodarts opens the cameras and after every restart or standby.
+* **Presets**: save the settings of all cameras under a name (e.g. day / evening light) and load them in one tap.
+* **Live view** that never takes a camera away from Autodarts: while Autodarts runs, it shows Autodarts' own picture.
+
+---
+
+### 7. Screen & Touch Manager
 Wayland display orientation and touch coordinate matrix calibration.
 
 <div align="center">
@@ -156,13 +183,13 @@ Wayland display orientation and touch coordinate matrix calibration.
 
 ---
 
-### 6. Fullscreen Kiosk Mode
+### 8. Fullscreen Kiosk Mode
 Run Autodarts as a dedicated full-screen appliance with customized browser controls.
 
 <div align="center">
-  <img src="docs/assets/screenshots/06-kiosk-controls.png" alt="Fullscreen Kiosk Mode with In-Page Controls" width="420">
+  <img src="docs/assets/screenshots/06-kiosk-controls.png" alt="Fullscreen Kiosk Mode with In-Page Controls" width="560">
 </div>
 
-* Boots Chromium directly into fullscreen mode without desktop distractions.
-* Toggle automatic autostart on boot.
-* Built-in Chromium extension adding Power, Reboot, and Exit buttons directly into the Autodarts web scoreboard.
+* Boots Chromium directly into fullscreen mode without desktop distractions, optionally on login.
+* Built-in Chromium extension adding Power, Restart, Exit and Board Configuration buttons directly into the Autodarts header.
+* Optional dartboard light button for WLED, Tasmota or Shelly devices, with an On / Off test.

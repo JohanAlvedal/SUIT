@@ -3,6 +3,7 @@ import subprocess
 import sys
 import os
 from core.logger import get_logger
+from core.i18n import tr
 
 logger = get_logger("update")
 
@@ -136,7 +137,7 @@ class UpdateService:
                 "remote_commit": "",
                 "commits_behind": 0,
                 "latest_message": "",
-                "error": f"Failed checking updates: {str(e)}",
+                "error": tr("Failed checking updates: {error}").format(error=str(e)),
             }
 
     @classmethod
@@ -154,7 +155,7 @@ class UpdateService:
             )
             if fetch_res.returncode != 0:
                 err = fetch_res.stderr.strip() or "Network error"
-                return False, f"Failed fetching updates: {err}"
+                return False, tr("Failed fetching updates: {error}").format(error=err)
 
             # Fast-forward only: a divergent or locally modified checkout is
             # left untouched and the user receives a meaningful error instead.
@@ -176,23 +177,23 @@ class UpdateService:
             from core.package_manager import distribution_id
             if distribution_id() == "fedora":
                 cls.ensure_autodarts_service()
-                cls.ensure_camera_boot_service()
+                cls.ensure_camera_keeper()
                 cls.ensure_display_autostart()
             return True, "SUIT updated successfully."
         except subprocess.TimeoutExpired:
             return False, "Update timed out. Please check internet connection."
         except Exception as e:
             logger.exception("Update execution failed")
-            return False, f"Update failed: {str(e)}"
+            return False, tr("Update failed: {error}").format(error=str(e))
 
     @classmethod
-    def ensure_camera_boot_service(cls) -> None:
-        """Heal camera boot service unit to resolve any systemd ordering cycles."""
+    def ensure_camera_keeper(cls) -> None:
+        """Migrate old camera watchers and Manual Controls data; keep the camera keeper unit on this checkout."""
         try:
-            from core.camera_manual_service import CameraManualService
-            CameraManualService.heal_boot_service_if_needed()
+            from core.hbvcal import service
+            service.heal()
         except Exception as e:
-            logger.warning("Post-update camera boot service check notice: %s", e)
+            logger.warning("Post-update camera keeper check notice: %s", e)
 
     @classmethod
     def ensure_display_autostart(cls) -> None:
@@ -202,6 +203,16 @@ class UpdateService:
             DisplayService.ensure_autostart()
         except Exception as e:
             logger.warning("Post-update display autostart check notice: %s", e)
+
+    @classmethod
+    def ensure_shell_extensions_installed(cls) -> None:
+        """Pre-install the switchable SUIT shell extensions (disabled) so GNOME Shell discovers
+        them at the next login and the System view switches can then enable them without a relogin."""
+        try:
+            from core.desktop_service import DesktopService
+            DesktopService.install_suit_extensions()
+        except Exception as e:
+            logger.warning("Shell extension pre-install notice: %s", e)
 
     @classmethod
     def ensure_autodarts_service(cls) -> None:

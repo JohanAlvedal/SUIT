@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from core.logger import get_logger
 from core.package_manager import distribution_id
+from core.i18n import tr
 
 logger = get_logger("kiosk")
 
@@ -197,7 +198,7 @@ class KioskService:
             return True, "In-Page Controls extension installed into Chromium."
         except Exception as e:
             logger.exception("Failed installing permanent extension into Chromium")
-            return False, f"Installation failed: {e}"
+            return False, tr("Installation failed: {error}").format(error=e)
 
     @classmethod
     def uninstall_permanent_extension(cls, chromium_conf: Path | None = None, desktop_path: Path | None = None) -> tuple[bool, str]:
@@ -255,7 +256,7 @@ class KioskService:
             return True, "In-Page Controls extension removed from Chromium."
         except Exception as e:
             logger.exception("Failed uninstalling permanent extension from Chromium")
-            return False, f"Removal failed: {e}"
+            return False, tr("Removal failed: {error}").format(error=e)
 
     @classmethod
     def ensure_native_messaging_host(cls, host_script_path: Path | None = None) -> bool:

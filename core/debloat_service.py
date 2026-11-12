@@ -5,8 +5,11 @@ import re
 import shutil
 from core.logger import get_logger
 from core.package_manager import distribution_id, install_packages
+from core.i18n import tr
 
 logger = get_logger("debloat")
+
+DISCORD_FLATPAK = "com.discordapp.Discord"
 
 
 class DebloatService:
@@ -71,7 +74,7 @@ class DebloatService:
                 icon = info[2] if len(info) > 2 else "application-x-executable-symbolic"
             else:
                 title = key.replace("gnome-", "").replace("-", " ").capitalize()
-                desc = f"Package: {key}"
+                desc = tr("Package: {name}").format(name=key)
                 icon = "application-x-executable-symbolic"
 
             full_pkg_name = key
@@ -200,7 +203,7 @@ class DebloatService:
                             if pkg_name.startswith(k):
                                 disp_name = info[0]
                                 break
-                        progress_callback(cur_val, tot_val, f"Removing {disp_name} ({cur_val}/{tot_val})...")
+                        progress_callback(cur_val, tot_val, tr("Removing {name} ({cur}/{tot})...").format(name=tr(disp_name), cur=cur_val, tot=tot_val))
                     except ValueError:
                         pass
                 elif progress_callback:
@@ -217,10 +220,10 @@ class DebloatService:
             cls.clean_dash_favorites()
             cls.move_seahorse_to_utilities()
             logger.info("Debloat and Dash cleanup completed successfully")
-            return True, f"Successfully removed {len(packages)} application(s)."
+            return True, tr("Successfully removed {packages} application(s).").format(packages=len(packages))
         except Exception as e:
             logger.exception("Failed debloating selected packages")
-            return False, f"Debloat failed: {e}"
+            return False, tr("Debloat failed: {error}").format(error=e)
 
     @classmethod
     def debloat_system(cls, package_list: list[str] | None = None, progress_callback=None) -> tuple[bool, str]:
@@ -259,6 +262,26 @@ class DebloatService:
             "tailscale": tail_status.get("installed", False),
             "tailscale_details": tail_status
         }
+
+    @staticmethod
+    def is_discord_installed() -> bool:
+        try:
+            return subprocess.run(["flatpak", "info", DISCORD_FLATPAK], capture_output=True, timeout=5).returncode == 0
+        except Exception:
+            return False
+
+    @classmethod
+    def install_discord(cls) -> tuple[bool, str]:
+        # Not in the Fedora repos; Flathub ships the official client
+        try:
+            subprocess.run(["sudo", "-n", "flatpak", "remote-modify", "--enable", "flathub"], capture_output=True, timeout=15)
+            subprocess.run(["sudo", "-n", "flatpak", "install", "-y", "--noninteractive", "flathub", DISCORD_FLATPAK],
+                           check=True, capture_output=True, timeout=900)
+            cls.add_favorite_app(f"{DISCORD_FLATPAK}.desktop")
+            return True, "Discord installed and pinned to Dash."
+        except Exception as e:
+            logger.exception("Failed installing Discord")
+            return False, tr("Failed installing Discord: {error}").format(error=e)
 
     @classmethod
     def install_chromium(cls) -> tuple[bool, str]:

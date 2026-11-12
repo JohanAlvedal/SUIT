@@ -1,37 +1,53 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, GLib
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gtk, Adw, GLib, Gdk, GdkPixbuf, GObject, Graphene, Gsk
 from core.logger import get_logger
 from core.update_service import UpdateService
 from core.package_manager import distribution_id
+from core.autoglow_service import AutoGlowService
 from modules_gtk.async_utils import run_async
+
+from modules_gtk.ui_helpers import build_page_shell
+from core.i18n import tr, get_language
 
 logger = get_logger("menu")
 
+FLAG_SIZE = (25, 15)  # 5:3, so the German stripes land on whole pixels
+FLAG_OVERSAMPLE = 4
+
+
+class FlagPaintable(GObject.Object, Gdk.Paintable):
+    """An SVG flag rendered at FLAG_OVERSAMPLE x its size and filtered down, so it stays crisp at any scale."""
+
+    def __init__(self, path, width, height):
+        super().__init__()
+        self._w, self._h = width, height
+        pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+            str(path), width * FLAG_OVERSAMPLE, height * FLAG_OVERSAMPLE, False)
+        self._texture = Gdk.Texture.new_for_pixbuf(pb)
+
+    def do_get_intrinsic_width(self):
+        return self._w
+
+    def do_get_intrinsic_height(self):
+        return self._h
+
+    def do_snapshot(self, snapshot, width, height):
+        rect = Graphene.Rect().init(0, 0, width, height)
+        snapshot.append_scaled_texture(self._texture, Gsk.ScalingFilter.TRILINEAR, rect)
+
 class MainMenuView(Adw.NavigationPage):
     def __init__(self, window):
-        title = "SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora"
+        title = tr("SUIT for Ubuntu") if distribution_id() == "ubuntu" else tr("SUIT for Fedora")
         super().__init__(title=title, tag="main_menu")
         self.app_title = title
         self.window = window
         
         # Scrolled container with kinetic touch scrolling
-        scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
-        scrolled.set_kinetic_scrolling(True)
-        scrolled.set_overlay_scrolling(True)
+        scrolled, main_box = build_page_shell()
         self.set_child(scrolled)
-        
-        # Clamp to center and constrain width
-        clamp = Adw.Clamp(maximum_size=820, tightening_threshold=640)
-        clamp.set_margin_top(6)
-        clamp.set_margin_bottom(8)
-        clamp.set_margin_start(10)
-        clamp.set_margin_end(10)
-        scrolled.set_child(clamp)
-
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        clamp.set_child(main_box)
 
         # Header Banner Card with Logo
         banner_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -47,7 +63,7 @@ class MainMenuView(Adw.NavigationPage):
         logo_path = self.window.project_dir / "assets" / "icons" / "suit-icon.png"
         if logo_path.exists():
             logo_img = Gtk.Image.new_from_file(str(logo_path))
-            logo_img.set_pixel_size(36)
+            logo_img.set_pixel_size(52)
             logo_img.set_valign(Gtk.Align.CENTER)
             banner_inner.append(logo_img)
 
@@ -59,18 +75,21 @@ class MainMenuView(Adw.NavigationPage):
         self.lbl_title.add_css_class("title-3")
         text_box.append(self.lbl_title)
 
-        self.lbl_subtitle = Gtk.Label(label="Setup Utilities by IteraThor for Autodarts", xalign=0)
+        self.lbl_subtitle = Gtk.Label(label=tr("Setup Utilities by IteraThor for Autodarts"), xalign=0)
         self.lbl_subtitle.add_css_class("dim-label")
         text_box.append(self.lbl_subtitle)
 
         banner_inner.append(text_box)
+
+        # Language switch (English / German flags), left of the Community button
+        banner_inner.append(self._build_language_switch())
 
         # Community & QR Dialog Button on most right
         self.btn_community = Gtk.Button()
         self.btn_community.set_valign(Gtk.Align.CENTER)
         self.btn_community.add_css_class("compact-btn")
         self.btn_community.add_css_class("secondary-btn")
-        self.btn_community.set_tooltip_text("IteraThor Community, Discord & 3D Print Models")
+        self.btn_community.set_tooltip_text(tr("IteraThor Community, Discord & 3D Print Models"))
 
         btn_comm_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         btn_comm_box.set_halign(Gtk.Align.CENTER)
@@ -80,7 +99,7 @@ class MainMenuView(Adw.NavigationPage):
         icon_qr.set_pixel_size(16)
         btn_comm_box.append(icon_qr)
 
-        lbl_comm = Gtk.Label(label="Community")
+        lbl_comm = Gtk.Label(label=tr("Community"))
         lbl_comm.add_css_class("heading")
         btn_comm_box.append(lbl_comm)
 
@@ -96,16 +115,18 @@ class MainMenuView(Adw.NavigationPage):
         main_box.append(self.pref_group)
 
         self.rows = {}
+        self.new_badges = {}
 
         # Native Module Items
         items = [
-            ("btn_system", "preferences-system-symbolic", "System Utilities & Tweaks", "Performance, power, and touch tweaks.", self._open_system, True),
-            ("btn_autodarts", "darts-symbolic", "Autodarts Setup", "Board pairing, service, and camera telemetry.", self._open_autodarts, True),
-            ("btn_camera_tools", "camera-photo-symbolic", "Camera Tools", "Focus calibration, manual controls, and diagnostics.", self._open_camera_tools, True),
-            ("btn_touch", "screen-touch-symbolic", "Screen & Touch Manager", "Display rotation and touch calibration.", self._open_rotation, True),
-            ("btn_kiosk", "view-fullscreen-symbolic", "Kiosk Mode", "Fullscreen browser autostart and controls.", self._open_kiosk, True),
-            ("btn_autoglow", "display-brightness-symbolic", "AutoGlow 2 Manager", "WLED dartboard automation and lighting effects.", None, False),
+            ("btn_system", "preferences-system-symbolic", tr("System Utilities & Tweaks"), tr("Performance, power, and touch tweaks."), self._open_system, True),
+            ("btn_autodarts", "darts-symbolic", tr("Autodarts Setup"), tr("Board pairing, service, and camera telemetry."), self._open_autodarts, True),
+            ("btn_camera_tools", "camera-photo-symbolic", tr("Camera Tools"), tr("Focus calibration, camera controls, and the camera optimizer."), self._open_camera_tools, True),
+            ("btn_touch", "screen-touch-symbolic", tr("Screen & Touch Manager"), tr("Display rotation and touch calibration."), self._open_rotation, True),
+            ("btn_kiosk", "view-fullscreen-symbolic", tr("Kiosk Mode"), tr("Fullscreen browser autostart and controls."), self._open_kiosk, True),
+            ("btn_autoglow", "display-brightness-symbolic", tr("AutoGlow 2 Manager"), tr("WLED dartboard automation and lighting effects."), self._open_autoglow, True),
         ]
+        new_items = {"btn_autoglow"}
 
         for item in items:
             key, icon_name, title_str, subtitle_str = item[0], item[1], item[2], item[3]
@@ -126,6 +147,19 @@ class MainMenuView(Adw.NavigationPage):
             if is_enabled:
                 row.set_activatable(True)
                 row.connect("activated", lambda r, cb=callback: cb())
+                if key in new_items:
+                    lbl_new = Gtk.Label(label=tr("NEW"))
+                    lbl_new.add_css_class("status-pill-new")
+                    lbl_new.set_valign(Gtk.Align.CENTER)
+                    row.add_suffix(lbl_new)
+                    self.new_badges[key] = lbl_new
+                if key == "btn_autoglow":
+                    self.lbl_autoglow_update = Gtk.Label(label=tr("UPDATE"))
+                    self.lbl_autoglow_update.add_css_class("status-pill-update")
+                    self.lbl_autoglow_update.set_valign(Gtk.Align.CENTER)
+                    self.lbl_autoglow_update.set_tooltip_text(tr("A new AutoGlow 2 version is available"))
+                    self.lbl_autoglow_update.set_visible(False)
+                    row.add_suffix(self.lbl_autoglow_update)
                 chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
                 chevron.set_opacity(0.5)
                 chevron.set_valign(Gtk.Align.CENTER)
@@ -134,7 +168,7 @@ class MainMenuView(Adw.NavigationPage):
                 row.set_activatable(False)
                 row.set_opacity(0.55)
 
-                lbl_badge = Gtk.Label(label="Coming Soon")
+                lbl_badge = Gtk.Label(label=tr("Coming Soon"))
                 lbl_badge.add_css_class("status-pill-coming-soon")
                 lbl_badge.set_valign(Gtk.Align.CENTER)
                 row.add_suffix(lbl_badge)
@@ -150,7 +184,6 @@ class MainMenuView(Adw.NavigationPage):
         self.btn_update = Gtk.Button()
         self.btn_update.add_css_class("suggested-action")
         self.btn_update.add_css_class("touch-btn")
-        self.btn_update.set_size_request(-1, 38)
         self.btn_update.set_margin_top(0)
 
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -160,13 +193,16 @@ class MainMenuView(Adw.NavigationPage):
         upd_icon.set_pixel_size(18)
         btn_box.append(upd_icon)
 
-        lbl_btn = Gtk.Label(label="Check for Updates")
+        lbl_btn = Gtk.Label(label=tr("Check for Updates"))
         lbl_btn.add_css_class("heading")
         btn_box.append(lbl_btn)
 
         self.btn_update.set_child(btn_box)
         self.btn_update.connect("clicked", self._on_check_updates)
         self.update_group.append(self.btn_update)
+
+        self._update_available = False
+        GLib.idle_add(self._check_updates_on_start)
 
 
     def _open_autodarts(self):
@@ -189,15 +225,16 @@ class MainMenuView(Adw.NavigationPage):
         logger.debug("Navigating to Kiosk view")
         self.window.open_kiosk_page()
 
+    def _open_autoglow(self):
+        logger.debug("Navigating to AutoGlow 2 Manager view")
+        self.window.open_autoglow_page()
+
     def _open_system(self):
         logger.debug("Navigating to System Utilities view")
         self.window.open_system_page()
 
-    def _open_usb(self):
-        logger.debug("Navigating to USB Bandwidth view")
-        self.window.open_usb_page()
-
-    def _set_update_button_loading(self, loading: bool, text: str = "Checking for Updates..."):
+    def _set_update_button_loading(self, loading: bool, text: str = ""):
+        text = text or tr("Checking for Updates...")
         self.btn_update.set_sensitive(not loading)
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         box.set_halign(Gtk.Align.CENTER)
@@ -214,15 +251,51 @@ class MainMenuView(Adw.NavigationPage):
             upd_icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
             upd_icon.set_pixel_size(22)
             box.append(upd_icon)
-            lbl = Gtk.Label(label="Check for Updates")
+            lbl = Gtk.Label(label=tr("Update Available") if self._update_available else tr("Check for Updates"))
             lbl.add_css_class("heading")
             box.append(lbl)
 
         self.btn_update.set_child(box)
 
+    def _set_update_available(self, available: bool):
+        self._update_available = available
+        if available:
+            self.btn_update.remove_css_class("suggested-action")
+            self.btn_update.add_css_class("update-available-btn")
+        else:
+            self.btn_update.remove_css_class("update-available-btn")
+            self.btn_update.add_css_class("suggested-action")
+        self._set_update_button_loading(False)
+
+    def _check_updates_on_start(self):
+        """Quiet background check at launch; only recolors the button when an update exists."""
+        def worker():
+            return UpdateService.check_update()
+
+        def on_done(info):
+            if info and info.get("has_update"):
+                self._set_update_available(True)
+
+        run_async(worker, on_done=on_done)
+
+        def autoglow_worker():
+            # Only SUIT's own git install can update; nothing to ask GitHub otherwise
+            if AutoGlowService.get_install_dir() is None:
+                return {}
+            return AutoGlowService.check_update()
+
+        run_async(autoglow_worker, on_done=lambda info: self.set_autoglow_update(bool(info and info.get("has_update"))))
+        return False
+
+    def set_autoglow_update(self, available: bool):
+        """Show UPDATE instead of NEW on the AutoGlow 2 row; the AutoGlow page also calls this."""
+        self.lbl_autoglow_update.set_visible(available)
+        if "btn_autoglow" in self.new_badges:
+            self.new_badges["btn_autoglow"].set_visible(not available)
+
     def _on_check_updates(self, btn):
         logger.info("Check for updates and requirements triggered")
-        self._set_update_button_loading(True, "Checking for Updates...")
+        self._set_update_button_loading(True, tr("Checking for Updates..."))
 
         def worker():
             missing_reqs = UpdateService.check_requirements()
@@ -238,6 +311,8 @@ class MainMenuView(Adw.NavigationPage):
                 self._show_missing_requirements_dialog(missing_reqs, next_info=info)
                 return
 
+            if not info.get("error"):
+                self._set_update_available(bool(info.get("has_update")))
             self._process_update_info(info)
 
         run_async(worker, on_done=on_done)
@@ -245,11 +320,11 @@ class MainMenuView(Adw.NavigationPage):
     def _show_missing_requirements_dialog(self, missing_reqs: list[str], next_info: dict | None = None):
         pkgs_formatted = "\n".join(f"• {pkg}" for pkg in missing_reqs)
         dialog = Adw.AlertDialog(
-            heading="Requirements Not Installed",
-            body=f"The following required packages are not installed:\n\n{pkgs_formatted}\n\nInstall missing requirements now?"
+            heading=tr("Requirements Not Installed"),
+            body=tr("The following required packages are not installed:\n\n{pkgs}\n\nInstall missing requirements now?").format(pkgs=pkgs_formatted)
         )
-        dialog.add_response("cancel", "Later")
-        dialog.add_response("install", "Install")
+        dialog.add_response("cancel", tr("Later"))
+        dialog.add_response("install", tr("Install"))
         dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
 
         def on_response(d, response):
@@ -260,8 +335,8 @@ class MainMenuView(Adw.NavigationPage):
         dialog.present(self.window)
 
     def _perform_install_requirements(self, missing_reqs: list[str], next_info: dict | None = None):
-        self.window.show_toast("Installing requirements...")
-        self._set_update_button_loading(True, "Installing...")
+        self.window.show_toast(tr("Installing requirements..."))
+        self._set_update_button_loading(True, tr("Installing..."))
 
         def worker():
             return UpdateService.install_requirements(missing_reqs)
@@ -281,23 +356,26 @@ class MainMenuView(Adw.NavigationPage):
             return
 
         if not info.get("has_update"):
-            self.window.show_toast(f"{self.app_title} is up to date.")
+            self.window.show_toast(tr("{app} is up to date.").format(app=self.app_title))
             return
 
         count = info.get("commits_behind", 1)
         msg = info.get("latest_message", "")
 
-        body_text = f"A new version of SUIT is available ({count} update{'s' if count != 1 else ''})."
+        if count == 1:
+            body_text = tr("A new version of SUIT is available (1 update).")
+        else:
+            body_text = tr("A new version of SUIT is available ({count} updates).").format(count=count)
         if msg:
-            body_text += f"\n\nLatest: {msg}"
-        body_text += "\n\nInstall the latest updates now?"
+            body_text += "\n\n" + tr("Latest: {msg}").format(msg=msg)
+        body_text += "\n\n" + tr("Install the latest updates now?")
 
         dialog = Adw.AlertDialog(
-            heading="Update Available",
+            heading=tr("Update Available"),
             body=body_text
         )
-        dialog.add_response("cancel", "Later")
-        dialog.add_response("update", "Update Now")
+        dialog.add_response("cancel", tr("Later"))
+        dialog.add_response("update", tr("Update Now"))
         dialog.set_response_appearance("update", Adw.ResponseAppearance.SUGGESTED)
 
         def on_response(d, response):
@@ -308,8 +386,8 @@ class MainMenuView(Adw.NavigationPage):
         dialog.present(self.window)
 
     def _perform_update(self):
-        self.window.show_toast("Downloading and applying update...")
-        self._set_update_button_loading(True, "Updating SUIT...")
+        self.window.show_toast(tr("Downloading and applying update..."))
+        self._set_update_button_loading(True, tr("Updating SUIT..."))
 
         def worker():
             return UpdateService.apply_update()
@@ -321,12 +399,13 @@ class MainMenuView(Adw.NavigationPage):
                 self.window.show_toast(msg)
                 return
 
+            self._set_update_available(False)
             dialog = Adw.AlertDialog(
-                heading="Update Complete",
-                body="SUIT has been successfully updated.\n\nRestart now to apply the changes?"
+                heading=tr("Update Complete"),
+                body=tr("SUIT has been successfully updated.\n\nRestart now to apply the changes?")
             )
-            dialog.add_response("later", "Restart Later")
-            dialog.add_response("restart", "Restart SUIT")
+            dialog.add_response("later", tr("Restart Later"))
+            dialog.add_response("restart", tr("Restart SUIT"))
             dialog.set_response_appearance("restart", Adw.ResponseAppearance.SUGGESTED)
 
             def on_response(d, response):
@@ -337,6 +416,38 @@ class MainMenuView(Adw.NavigationPage):
             dialog.present(self.window)
 
         run_async(worker, on_done=on_done)
+
+    def _build_language_switch(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_margin_end(-8)  # sits right against the Community button
+        flags_dir = self.window.project_dir / "assets" / "flags"
+        group = None
+        for lang, tooltip in (("en", "English"), ("de", "Deutsch")):
+            btn = Gtk.ToggleButton()
+            btn.add_css_class("flat")
+            btn.add_css_class("lang-flag-btn")
+            btn.set_valign(Gtk.Align.CENTER)
+            btn.set_tooltip_text(tooltip)
+            pic = Gtk.Picture.new_for_paintable(FlagPaintable(flags_dir / f"{lang}.svg", *FLAG_SIZE))
+            pic.set_can_shrink(False)
+            pic.set_halign(Gtk.Align.CENTER)
+            pic.set_valign(Gtk.Align.CENTER)
+            btn.set_child(pic)
+            if group:
+                btn.set_group(group)
+            else:
+                group = btn
+            btn.set_active(lang == get_language())
+            btn.connect("toggled", self._on_language_toggled, lang)
+            box.append(btn)
+        return box
+
+    def _on_language_toggled(self, btn, lang):
+        if btn.get_active() and lang != get_language():
+            logger.info("Switching UI language to %s", lang)
+            # Rebuild after the toggle signal returns: the rebuild replaces this page
+            GLib.idle_add(lambda: self.window.set_language(lang) or False)
 
     def _open_community_dialog(self, *args):
         logger.debug("Opening Community & QR dialog")
