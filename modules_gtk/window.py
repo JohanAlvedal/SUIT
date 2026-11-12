@@ -13,15 +13,22 @@ from core.package_manager import distribution_id
 from core.update_service import UpdateService
 from modules_gtk.async_utils import run_async
 from modules_gtk.menu import MainMenuView
+from core.i18n import tr, set_language
 
 logger = get_logger("window")
 
-# Longest the window stays open after a close request while the Camera Optimizer restores a camera
-RESTORE_WAIT_S = 20.0
+# Large pages with a live view: they open the window maximized
+CAMERA_PAGES = ("camera_controls", "camera_optimizer")
+
+# Longest the window stays open after a close request while a Camera Optimizer job (optimize/restore) runs
+JOB_WAIT_S = 360.0
+
+# Input-free time before the background OpenCV import starts (it briefly freezes the UI)
+PREWARM_QUIET_S = 1.5
 
 class SuitWindow(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="SUIT for Ubuntu" if distribution_id() == "ubuntu" else "SUIT for Fedora")
+        super().__init__(application=app, title=tr("SUIT for Ubuntu") if distribution_id() == "ubuntu" else tr("SUIT for Fedora"))
         # Determine monitor size for display-aware default window bounds
         display = Gdk.Display.get_default()
         screen_w, screen_h = 1280, 800
@@ -77,8 +84,8 @@ class SuitWindow(Adw.ApplicationWindow):
         # Touch-Friendly Back Button (visible on subpages)
         self.btn_back = Gtk.Button.new_from_icon_name("go-previous-symbolic")
         self.btn_back.add_css_class("flat")
-        self.btn_back.set_tooltip_text("Back to Menu")
-        self.btn_back.set_size_request(46, 44)
+        self.btn_back.set_tooltip_text(tr("Back to Menu"))
+        self.btn_back.set_size_request(30, 28)
         self.btn_back.set_visible(False)
         self.btn_back.connect("clicked", lambda b: self._on_back_clicked())
         self.header_bar.pack_start(self.btn_back)
@@ -97,12 +104,12 @@ class SuitWindow(Adw.ApplicationWindow):
         self.autodarts_page = None
         self.focus_page = None
         self.camera_tools_page = None
-        self.camera_manual_page = None
-        self.cam_calibration_page = None
+        self.camera_controls_page = None
+        self.camera_optimizer_page = None
         self.rotation_page = None
         self.kiosk_page = None
         self.system_page = None
-        self.usb_page = None
+        self.autoglow_page = None
 
         # Push Main Menu
         self.menu_page = MainMenuView(self)
@@ -118,7 +125,7 @@ class SuitWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
 
     def _on_back_clicked(self):
-        """Header back: a page may ask first (e.g. Camera Optimizer while tuning)."""
+        """Header back: a page may ask first."""
         page = self.nav_view.get_visible_page()
         confirm = getattr(page, "confirm_leave", None)
         if callable(confirm) and confirm(self.nav_view.pop):
@@ -137,26 +144,23 @@ class SuitWindow(Adw.ApplicationWindow):
             except Exception:
                 logger.exception("Error executing on_page_closed on window close")
 
-        # The Camera Optimizer first has to stop mid-measurement and put the camera back. That
-        # can take several seconds, so keep the window (insensitive) until its restore thread is
-        # done instead of exiting with a camera on test settings. Its page may already be popped.
-        threads = []
-        for p in (page, getattr(self, "cam_calibration_page", None)):
-            t = getattr(p, "_restore_thread", None) if p is not None else None
-            if t is not None and t.is_alive() and t not in threads:
-                threads.append(t)
-        if not threads:
+        # A Camera Optimizer job runs in this process with Autodarts stopped. Quitting mid-job would
+        # leave Autodarts down, so keep the window (insensitive) until the job is done. Its page may
+        # already be popped.
+        opt = getattr(self, "camera_optimizer_page", None)
+        t = opt.job_thread if opt is not None else None
+        if t is None or not t.is_alive():
             return False
 
         self.set_sensitive(False)
-        self.title_widget.set_subtitle("Putting the cameras back…")
-        deadline = time.monotonic() + RESTORE_WAIT_S
+        self.title_widget.set_subtitle(tr("Finishing the camera optimization…"))
+        deadline = time.monotonic() + JOB_WAIT_S
 
         def _poll():
-            if any(t.is_alive() for t in threads) and time.monotonic() < deadline:
+            if t.is_alive() and time.monotonic() < deadline:
                 return True
-            if any(t.is_alive() for t in threads):
-                logger.error("Camera restore still running after %.0f s; closing anyway", RESTORE_WAIT_S)
+            if t.is_alive():
+                logger.error("Camera Optimizer job still running after %.0f s; closing anyway", JOB_WAIT_S)
             self._close_ready = True
             self.close()
             return False
@@ -166,16 +170,50 @@ class SuitWindow(Adw.ApplicationWindow):
 
     def _start_background_prewarm(self):
         """Asynchronously pre-warm heavy dependencies (OpenCV, GStreamer, CameraFocusView)
-        so that tapping the Camera Focus menu card is instantaneous on the first click."""
+        so that tapping the Camera Focus menu card is instantaneous on the first click.
+
+        Importing OpenCV holds the GIL for ~0.4 s, which freezes the UI even from a thread,
+        so it waits until the user has left the window alone for PREWARM_QUIET_S."""
+        quiet = threading.Event()
+        last_input = [time.monotonic()]
+
+        def _on_event(_ctl, _event):
+            last_input[0] = time.monotonic()
+            return False
+
+        ctl = Gtk.EventControllerLegacy()
+        ctl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        ctl.connect("event", _on_event)
+        self.add_controller(ctl)
+
+        def _check_quiet():
+            if time.monotonic() - last_input[0] < PREWARM_QUIET_S:
+                return True
+            self.remove_controller(ctl)
+            quiet.set()
+            return False
+
+        GLib.timeout_add(250, _check_quiet)
+
         def _bg_prewarm():
             time.sleep(0.4)  # Let main menu render smoothly first
             # Auto-heal boot services (e.g. after CLI git pull); independent of OpenCV availability
             try:
-                UpdateService.ensure_camera_boot_service()
+                UpdateService.ensure_camera_keeper()
                 UpdateService.ensure_display_autostart()
+                UpdateService.ensure_shell_extensions_installed()
             except Exception as e:
                 logger.debug("Background service heal notice: %s", e)
 
+            # After the heal: it already reinstalls the bundled shell extensions
+            try:
+                from core import upgrade_service
+                result = upgrade_service.startup_check()
+                GLib.idle_add(self._on_upgrade_check, result)
+            except Exception:
+                logger.exception("System upgrade check failed")
+
+            quiet.wait()
             try:
                 # Pre-import heavy native C extensions in background thread
                 import cv2  # noqa: F401
@@ -192,6 +230,50 @@ class SuitWindow(Adw.ApplicationWindow):
                 logger.debug("Background pre-warm notice: %s", e)
 
         threading.Thread(target=_bg_prewarm, daemon=True, name="suit-prewarm").start()
+
+    def _on_upgrade_check(self, result):
+        """Startup: after a Fedora upgrade, offer to repair what it broke."""
+        problems = result.get("problems") or []
+        if not problems:
+            return False
+        if all(p.waiting_for_login for p in problems):
+            self.show_toast(tr("Restart the computer to finish the repair after the system update."))
+            return False
+        if self.get_visible_dialog() is not None:
+            # e.g. the privileges dialog: ask after it
+            GLib.timeout_add(1000, self._on_upgrade_check, result)
+            return False
+
+        changes = result.get("changes") or []
+        lines = "\n".join(f"• {p.title}" for p in problems)
+        if changes:
+            heading = tr("System Update Detected")
+            body = tr("{changes}\n\nThese SUIT features need repairs to work again:\n{list}").format(
+                changes="\n".join(changes), list=lines)
+        else:
+            heading = tr("Repairs Needed")
+            body = tr("A system update left these SUIT features broken:\n{list}").format(list=lines)
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.add_response("later", tr("Later"))
+        dialog.add_response("fix", tr("Fix All"))
+        dialog.set_response_appearance("fix", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("fix")
+        dialog.set_close_response("later")
+
+        def on_response(_d, response):
+            if response == "fix":
+                self.open_upgrade_repair_page(problems, changes, start=True)
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
+        return False
+
+    def open_upgrade_repair_page(self, problems, changes, start: bool = False):
+        from modules_gtk.upgrade_repair_page import UpgradeRepairPage
+        page = UpgradeRepairPage(self, problems, changes)
+        self._show_page(page)
+        if start:
+            page.fix_all()
 
     def _on_nav_changed(self, *args):
         """Updates back button visibility and title according to current page."""
@@ -236,7 +318,7 @@ class SuitWindow(Adw.ApplicationWindow):
         if not tag and hasattr(page, "get_tag"):
             tag = page.get_tag()
 
-        if tag == "camera_manual":
+        if tag in CAMERA_PAGES:
             self.maximize()
             return
 
@@ -250,14 +332,12 @@ class SuitWindow(Adw.ApplicationWindow):
             "main_menu": (760, 640),
             "camera_tools": (740, 480),
             "camera_focus": (940, 640),
-            "camera_manual": (920, 600),
-            "cam_calibration": (980, 640),
             "autodarts": (840, 680),
-            "rotation": (780, 680),
+            "rotation": (780, 600),
             "kiosk": (780, 680),
-            "system": (800, 780),
-            "usb": (780, 560),
+            "system": (800, 700),
             "advanced_users": (800, 720),
+            "hw_overlay": (800, 880),
         }
 
         ideal_w, ideal_h = target_map.get(tag, (780, 680))
@@ -267,8 +347,26 @@ class SuitWindow(Adw.ApplicationWindow):
         self.set_default_size(target_w, target_h)
 
 
+    def set_language(self, lang):
+        """Switch the UI language: rebuild the main menu and drop cached pages so they rebuild on next open."""
+        set_language(lang)
+        self.set_title(tr("SUIT for Fedora"))
+        self.btn_back.set_tooltip_text(tr("Back to Menu"))
+        for attr in ("autodarts_page", "focus_page", "camera_tools_page", "camera_controls_page",
+                     "rotation_page", "kiosk_page", "system_page", "autoglow_page"):
+            setattr(self, attr, None)
+        # A running Camera Optimizer job needs its page; it keeps the old language until restart
+        opt = self.camera_optimizer_page
+        t = opt.job_thread if opt is not None else None
+        if t is None or not t.is_alive():
+            self.camera_optimizer_page = None
+
+        self.menu_page = MainMenuView(self)
+        self._last_visible_page = self.menu_page
+        self.nav_view.replace([self.menu_page])
+
     def show_toast(self, text):
-        toast = Adw.Toast(title=text, timeout=3)
+        toast = Adw.Toast(title=tr(text), timeout=3)
         self.toast_overlay.add_toast(toast)
 
     def open_autodarts_page(self):
@@ -285,44 +383,46 @@ class SuitWindow(Adw.ApplicationWindow):
             self.camera_tools_page = CameraToolsView(self)
         self.nav_view.push(self.camera_tools_page)
 
-    def open_camera_manual_page(self):
+    def _show_page(self, page):
+        """Push a page, or pop back to it when it is already in the stack (the camera pages link to each other)."""
+        stack = self.nav_view.get_navigation_stack()
+        if any(stack.get_item(i) is page for i in range(stack.get_n_items())):
+            self.nav_view.pop_to_page(page)
+        else:
+            self.nav_view.push(page)
+
+    def open_camera_controls_page(self):
         try:
-            if not self.camera_manual_page:
-                from modules_gtk.camera_manual_view import CameraManualView
-                self.camera_manual_page = CameraManualView(self)
-            self.nav_view.push(self.camera_manual_page)
-            if hasattr(self.camera_manual_page, "on_page_opened"):
-                self.camera_manual_page.on_page_opened()
+            if not self.camera_controls_page:
+                from modules_gtk.camera_controls_view import CameraControlsPage
+                self.camera_controls_page = CameraControlsPage(self)
+            self._show_page(self.camera_controls_page)
+            self.camera_controls_page.on_page_opened()
         except ImportError as e:
-            logger.exception("Camera Manual Tool unavailable due to missing dependency: %s", e)
-            dialog = Adw.AlertDialog(
-                heading="OpenCV Required",
-                body="Camera Manual Mode requires OpenCV.\n\nInstall required dependencies with: ./install.sh"
-            )
-            dialog.add_response("ok", "OK")
-            dialog.present(self)
+            logger.exception("Camera Controls unavailable due to missing dependency: %s", e)
+            self._prompt_install_opencv(tr("Camera Controls"), self.open_camera_controls_page)
         except Exception as e:
-            logger.exception("Failed to open Camera Manual Tool: %s", e)
+            logger.exception("Failed to open Camera Controls: %s", e)
             dialog = Adw.AlertDialog(
-                heading="Camera Error",
-                body="Unable to open Camera Manual Mode. Check system log for details."
+                heading=tr("Camera Controls Error"),
+                body=tr("Unable to open Camera Controls. Check system log for details.")
             )
-            dialog.add_response("ok", "OK")
+            dialog.add_response("ok", tr("OK"))
             dialog.present(self)
 
     def _prompt_install_opencv(self, tool_name, retry_cb):
         dialog = Adw.AlertDialog(
-            heading="OpenCV Required",
-            body=f"{tool_name} requires OpenCV (python3-opencv)."
+            heading=tr("OpenCV Required"),
+            body=tr("{tool} requires OpenCV (python3-opencv).").format(tool=tool_name)
         )
-        dialog.add_response("cancel", "Later")
-        dialog.add_response("install", "Install Now")
+        dialog.add_response("cancel", tr("Later"))
+        dialog.add_response("install", tr("Install Now"))
         dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
 
         def on_resp(d, resp):
             if resp != "install":
                 return
-            self.show_toast("Installing python3-opencv...")
+            self.show_toast(tr("Installing python3-opencv..."))
 
             def worker():
                 return UpdateService.install_requirements(["python3-opencv"])
@@ -339,7 +439,7 @@ class SuitWindow(Adw.ApplicationWindow):
                 try:
                     import cv2  # noqa: F401
                 except ImportError:
-                    self.show_toast("OpenCV installed. Please restart SUIT to use this tool.")
+                    self.show_toast(tr("OpenCV installed. Please restart SUIT to use this tool."))
                     return
                 self.show_toast(msg)
                 retry_cb()
@@ -349,24 +449,23 @@ class SuitWindow(Adw.ApplicationWindow):
         dialog.connect("response", on_resp)
         dialog.present(self)
 
-    def open_cam_calibration_page(self):
+    def open_camera_optimizer_page(self):
         try:
-            if not self.cam_calibration_page:
-                from modules_gtk.cam_calibration_view import CamCalibrationPage
-                self.cam_calibration_page = CamCalibrationPage(self)
-            self.nav_view.push(self.cam_calibration_page)
-            if hasattr(self.cam_calibration_page, "on_page_opened"):
-                self.cam_calibration_page.on_page_opened()
+            if not self.camera_optimizer_page:
+                from modules_gtk.camera_optimizer_view import CameraOptimizerPage
+                self.camera_optimizer_page = CameraOptimizerPage(self)
+            self._show_page(self.camera_optimizer_page)
+            self.camera_optimizer_page.on_page_opened()
         except ImportError as e:
             logger.exception("Camera Optimizer unavailable due to missing dependency: %s", e)
-            self._prompt_install_opencv("Camera Optimizer", self.open_cam_calibration_page)
+            self._prompt_install_opencv(tr("Camera Optimizer"), self.open_camera_optimizer_page)
         except Exception as e:
             logger.exception("Failed to open Camera Optimizer: %s", e)
             dialog = Adw.AlertDialog(
-                heading="Camera Optimizer Error",
-                body="Unable to open Camera Optimizer. Check system log for details."
+                heading=tr("Camera Optimizer Error"),
+                body=tr("Unable to open Camera Optimizer. Check system log for details.")
             )
-            dialog.add_response("ok", "OK")
+            dialog.add_response("ok", tr("OK"))
             dialog.present(self)
 
     def open_focus_page(self):
@@ -379,14 +478,14 @@ class SuitWindow(Adw.ApplicationWindow):
                 self.focus_page.on_page_opened()
         except ImportError as e:
             logger.exception("Camera Focus Tool unavailable due to missing dependency: %s", e)
-            self._prompt_install_opencv("Camera Focus Tool", self.open_focus_page)
+            self._prompt_install_opencv(tr("Camera Focus Tool"), self.open_focus_page)
         except Exception as e:
             logger.exception("Failed to open Camera Focus Tool: %s", e)
             dialog = Adw.AlertDialog(
-                heading="Camera Focus Error",
-                body="Unable to open Camera Focus Tool. Check system log for details."
+                heading=tr("Camera Focus Error"),
+                body=tr("Unable to open Camera Focus Tool. Check system log for details.")
             )
-            dialog.add_response("ok", "OK")
+            dialog.add_response("ok", tr("OK"))
             dialog.present(self)
 
     def open_rotation_page(self):
@@ -405,6 +504,12 @@ class SuitWindow(Adw.ApplicationWindow):
         if hasattr(self.kiosk_page, "refresh"):
             self.kiosk_page.refresh()
 
+    def open_autoglow_page(self):
+        if not self.autoglow_page:
+            from modules_gtk.autoglow_view import AutoGlowView
+            self.autoglow_page = AutoGlowView(self)
+        self.nav_view.push(self.autoglow_page)
+
     def open_system_page(self):
         if not self.system_page:
             from modules_gtk.system_view import SystemView
@@ -412,11 +517,3 @@ class SuitWindow(Adw.ApplicationWindow):
         self.nav_view.push(self.system_page)
         if hasattr(self.system_page, "refresh"):
             self.system_page.refresh()
-
-    def open_usb_page(self):
-        if not self.usb_page:
-            from modules_gtk.usb_view import UsbView
-            self.usb_page = UsbView(self)
-        self.nav_view.push(self.usb_page)
-        if hasattr(self.usb_page, "refresh"):
-            self.usb_page.refresh()

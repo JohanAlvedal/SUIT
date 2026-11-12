@@ -10,38 +10,35 @@ list.boxed-list > row {
     padding-right: 12px;
 }
 
-/* Touch-friendly primary action buttons */
-.touch-btn {
-    min-height: 40px;
-    font-size: 14px;
-    font-weight: 600;
+/* Buttons: two sizes (touch 44px for standalone actions, compact 36px inside rows), one radius.
+   .secondary-btn / .secondary-btn-destructive only add colour, so they combine with either size. */
+.touch-btn,
+.compact-btn,
+.angle-touch-btn,
+.secondary-btn,
+.secondary-btn-destructive {
     border-radius: 10px;
-    padding-left: 14px;
-    padding-right: 14px;
+    font-weight: 600;
 }
 
-/* Big touch tiles for rotation angle toggles (0°, 90°, 180°, 270°) */
-.angle-touch-btn {
-    min-height: 44px;
-    min-width: 68px;
-    font-size: 14px;
-    font-weight: 700;
-    border-radius: 10px;
-}
+.secondary-btn,
+.secondary-btn-destructive { min-height: 40px; font-size: 14px; }
 
-/* Big buttons for service actions (Start / Stop / Restart) */
-.service-touch-btn {
-    min-height: 44px;
-    min-width: 96px;
-    font-size: 13px;
-    font-weight: 600;
-    border-radius: 10px;
-}
+.touch-btn { min-height: 44px; font-size: 14px; padding-left: 16px; padding-right: 16px; }
+
+button.compact-btn,
+.compact-btn { min-height: 36px; font-size: 13px; padding-left: 12px; padding-right: 12px; }
+
+.angle-touch-btn { min-height: 44px; min-width: 68px; font-size: 14px; font-weight: 700; }
 
 /* Enlarge HeaderBar navigation back button for easy thumb reaches */
+headerbar {
+    min-height: 34px;
+}
+
 headerbar button.image-button {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: 28px;
+    min-height: 28px;
     border-radius: 8px;
 }
 
@@ -60,11 +57,6 @@ switch {
     min-height: 26px;
 }
 
-/* Clear card spacing */
-.banner-card {
-    border-radius: 14px;
-}
-
 /* Touch Dashboard Cards */
 .tile-card {
     background-color: alpha(@window_fg_color, 0.04);
@@ -80,113 +72,37 @@ switch {
     padding: 10px 14px;
 }
 
-button.compact-btn,
-.compact-btn {
-    min-height: 38px;
-    font-size: 13px;
-    font-weight: 600;
-    border-radius: 8px;
-    padding-left: 12px;
-    padding-right: 12px;
-}
-
-
-.status-pill-running {
-    background-color: alpha(#2ec27e, 0.15);
-    color: #57e389;
-    border: 1px solid alpha(#2ec27e, 0.35);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-weight: 700;
-    font-size: 14px;
-}
-
-.status-pill-stopped {
-    background-color: alpha(#e01b24, 0.15);
-    color: #ff7b63;
-    border: 1px solid alpha(#e01b24, 0.35);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-weight: 700;
-    font-size: 14px;
-}
-
-.status-pill-fault {
-    background-color: alpha(#e5a50a, 0.18);
-    color: #f8e45c;
-    border: 1px solid alpha(#e5a50a, 0.4);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-weight: 700;
-    font-size: 14px;
-}
-
-.status-pill-checking {
-    background-color: alpha(@window_fg_color, 0.08);
-    color: @window_fg_color;
-    border: 1px solid alpha(@window_fg_color, 0.15);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-weight: 600;
-    font-size: 14px;
-}
-
-.status-pill-pending {
-    background-color: alpha(#e5a50a, 0.15);
-    color: #f8e45c;
-    border: 1px solid alpha(#e5a50a, 0.35);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-weight: 700;
-    font-size: 14px;
-}
-
-.status-pill-coming-soon {
-    background-color: alpha(@window_fg_color, 0.08);
-    color: alpha(@window_fg_color, 0.65);
-    border: 1px solid alpha(@window_fg_color, 0.16);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-weight: 700;
-    font-size: 13px;
-    letter-spacing: 0.3px;
-}
-
+/* Status pills: one shape for every state, colour is the only difference.
+   (.status-chip further down shares this geometry.) */
+.status-pill-running,
+.status-pill-stopped,
+.status-pill-checking,
+.status-pill-pending,
+.status-pill-coming-soon,
+.status-pill-new,
+.status-pill-update,
 .status-pill-experimental {
-    background-color: alpha(#e5a50a, 0.16);
-    color: #f6d32d;
-    border: 1px solid alpha(#e5a50a, 0.35);
-    border-radius: 20px;
-    padding: 4px 12px;
+    border-radius: 9999px;
+    padding: 3px 12px;
+    font-size: 12.5px;
     font-weight: 700;
-    font-size: 12px;
 }
 
+.status-pill-running { background-color: alpha(#2ec27e, 0.18); color: #57e389; }
 
-/* Detection Engine Status Row Themes */
-.detection-running image.status-icon {
-    color: #57e389;
-}
-.detection-running label.subtitle {
-    color: #57e389;
-    font-weight: 600;
-}
+.status-pill-stopped { background-color: alpha(#e01b24, 0.18); color: #ff7b63; }
 
-.detection-stopped image.status-icon {
-    color: alpha(@window_fg_color, 0.6);
-}
-.detection-stopped label.subtitle {
-    color: alpha(@window_fg_color, 0.6);
-}
+.status-pill-pending { background-color: alpha(#e5a50a, 0.18); color: #f8e45c; }
 
-.detection-fault image.status-icon {
-    color: #f8e45c;
-}
-.detection-fault label.subtitle {
-    color: #f8e45c;
-    font-weight: 600;
-}
+.status-pill-checking,
+.status-pill-coming-soon { background-color: alpha(@window_fg_color, 0.09); color: alpha(@window_fg_color, 0.7); }
 
+.status-pill-new { background-color: alpha(@accent_bg_color, 0.2); color: @accent_color; }
+
+/* Same amber as SUIT's own update button */
+.status-pill-update { background-color: #e5a50a; color: #1e1e1e; }
+
+.status-pill-experimental { background-color: alpha(#e5a50a, 0.18); color: #f8e45c; }
 
 .tile-card:disabled {
     opacity: 0.45;
@@ -195,10 +111,6 @@ button.compact-btn,
 .secondary-btn {
     background-color: alpha(@window_fg_color, 0.08);
     border: 1px solid alpha(@window_fg_color, 0.12);
-    border-radius: 12px;
-    font-weight: 600;
-    font-size: 14px;
-    min-height: 44px;
 }
 
 .secondary-btn:hover {
@@ -209,45 +121,10 @@ button.compact-btn,
     background-color: alpha(#e01b24, 0.12);
     border: 1px solid alpha(#e01b24, 0.25);
     color: #ff7b63;
-    border-radius: 12px;
-    font-weight: 600;
-    font-size: 14px;
-    min-height: 44px;
 }
 
 .secondary-btn-destructive:hover {
     background-color: alpha(#e01b24, 0.22);
-}
-
-/* Board Link Status Buttons */
-.board-btn-missing {
-    background-color: alpha(#e5a50a, 0.18);
-    color: #f8e45c;
-    border: 1px solid alpha(#e5a50a, 0.45);
-    border-radius: 12px;
-    font-weight: 700;
-    font-size: 14px;
-    min-height: 44px;
-}
-
-.board-btn-missing:hover {
-    background-color: alpha(#e5a50a, 0.28);
-    border-color: alpha(#e5a50a, 0.6);
-}
-
-.board-btn-linked {
-    background-color: alpha(#2ec27e, 0.15);
-    color: #57e389;
-    border: 1px solid alpha(#2ec27e, 0.4);
-    border-radius: 12px;
-    font-weight: 700;
-    font-size: 14px;
-    min-height: 44px;
-}
-
-.board-btn-linked:hover {
-    background-color: alpha(#2ec27e, 0.25);
-    border-color: alpha(#2ec27e, 0.55);
 }
 
 /* Warning Notice Banner */
@@ -258,6 +135,13 @@ button.compact-btn,
     padding: 14px 18px;
 }
 
+.warning-card-compact {
+    border-radius: 12px;
+    padding: 6px 8px 6px 14px;
+}
+
+.warning-card-compact .warning-text { font-size: 13px; }
+
 .warning-card image {
     color: #ff9800;
 }
@@ -267,33 +151,6 @@ button.compact-btn,
     font-weight: 500;
     font-size: 13.5px;
     line-height: 1.35;
-}
-
-/* Camera Focus Tool Styles */
-.focus-gauge-card {
-    background-color: alpha(@window_fg_color, 0.04);
-    border: 1px solid alpha(@window_fg_color, 0.08);
-    border-radius: 14px;
-    padding: 10px 12px;
-}
-
-.focus-gauge-score {
-    font-size: 32px;
-    font-weight: 800;
-    font-family: monospace;
-    letter-spacing: -1px;
-}
-
-.focus-gauge-score.score-good {
-    color: #2ec27e;
-}
-
-.focus-gauge-score.score-fair {
-    color: #f6d32d;
-}
-
-.focus-gauge-score.score-poor {
-    color: #e01b24;
 }
 
 .focus-trend-badge {
@@ -334,12 +191,6 @@ button.compact-btn,
     border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 16px;
     padding: 10px;
-}
-
-.focus-zoom-frame {
-    background-color: #0b0d0e;
-    border: 1px solid alpha(@window_fg_color, 0.12);
-    border-radius: 12px;
 }
 
 .camera-tab-bar {
@@ -392,39 +243,11 @@ button.compact-btn,
     font-weight: 500;
 }
 
-.usb-stat-large {
-    font-size: 22px;
-    font-weight: 800;
-    font-feature-settings: "tnum";
-}
-
 .qr-card {
     background-color: #ffffff;
     border-radius: 14px;
     padding: 10px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-}
-
-.dimmed-overlay-target {
-    opacity: 0.22;
-}
-
-.browser-integration-lock-overlay {
-    background-color: rgba(24, 26, 30, 0.92);
-    border: 1px solid alpha(@window_fg_color, 0.12);
-    border-radius: 16px;
-    padding: 22px 26px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
-}
-
-.browser-integration-lock-overlay label.title {
-    font-size: 16px;
-    font-weight: 700;
-}
-
-.browser-integration-lock-overlay label.subtitle {
-    font-size: 13px;
-    color: alpha(@window_fg_color, 0.7);
 }
 
 .apply-all-overlay {
@@ -455,37 +278,6 @@ button.compact-btn,
     color: alpha(@window_fg_color, 0.7);
 }
 
-/* Header Motion & Telemetry Bar */
-.header-motion-bar {
-    background-color: alpha(@window_fg_color, 0.04);
-    border: 1px solid alpha(@window_fg_color, 0.08);
-    border-radius: 10px;
-    padding: 3px 10px;
-}
-
-.motion-pill {
-    padding: 3px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: 6px;
-    color: alpha(@window_fg_color, 0.45);
-    background-color: transparent;
-    transition: all 120ms ease-in-out;
-}
-
-.motion-pill-active {
-    background-color: @accent_bg_color;
-    color: @accent_fg_color;
-    font-weight: 700;
-}
-
-.status-footer-item {
-    font-size: 12px;
-    font-weight: 600;
-    color: alpha(@window_fg_color, 0.75);
-    font-feature-settings: "tnum";
-}
-
 /* Autodarts Embedded Terminal Container */
 .terminal-card {
     background-color: #181825;
@@ -501,93 +293,6 @@ button.compact-btn,
     border: 1px solid alpha(@window_fg_color, 0.16);
 }
 
-/* CAM-librator GTK4 Theme Styles */
-.status-pill-active {
-    background-color: alpha(@accent_color, 0.18);
-    color: @accent_color;
-    border-radius: 9999px;
-    padding: 3px 12px;
-    font-weight: bold;
-}
-
-.status-pill-ok, .score-good {
-    background-color: alpha(#2ec27e, 0.20);
-    color: #2ec27e;
-    border-radius: 9999px;
-    padding: 3px 12px;
-    font-weight: bold;
-    font-size: 0.85em;
-}
-
-.status-pill-warn, .score-fair {
-    background-color: alpha(#e5a50a, 0.22);
-    color: #e5a50a;
-    border-radius: 9999px;
-    padding: 3px 12px;
-    font-weight: bold;
-    font-size: 0.85em;
-}
-
-.status-pill-bad, .score-poor {
-    background-color: alpha(#e01b24, 0.22);
-    color: #e01b24;
-    border-radius: 9999px;
-    padding: 3px 12px;
-    font-weight: bold;
-    font-size: 0.85em;
-}
-
-.pill-sharp {
-    background-color: alpha(#2ec27e, 0.20);
-    color: #2ec27e;
-    border-radius: 9999px;
-    padding: 3px 12px;
-    font-weight: bold;
-    font-size: 0.85em;
-}
-
-.pill-soft {
-    background-color: alpha(#e5a50a, 0.22);
-    color: #e5a50a;
-    border-radius: 9999px;
-    padding: 3px 12px;
-    font-weight: bold;
-    font-size: 0.85em;
-}
-
-.pill-blurry {
-    background-color: alpha(#e01b24, 0.22);
-    color: #e01b24;
-    border-radius: 9999px;
-    padding: 3px 12px;
-    font-weight: bold;
-    font-size: 0.85em;
-}
-
-.focus-gauge-score {
-    font-size: 1.8em;
-    font-weight: 900;
-    letter-spacing: -0.5px;
-}
-
-.focus-gauge-score.score-good {
-    color: #2ec27e;
-    background-color: transparent;
-    padding: 0;
-}
-
-.focus-gauge-score.score-fair {
-    color: #e5a50a;
-    background-color: transparent;
-    padding: 0;
-}
-
-.focus-gauge-score.score-poor {
-    color: #e01b24;
-    background-color: transparent;
-    padding: 0;
-}
-
 .focus-trend-badge {
     border-radius: 9999px;
     padding: 2px 10px;
@@ -595,116 +300,90 @@ button.compact-btn,
     font-weight: 700;
 }
 
-.trend-sharpening {
-    background-color: alpha(#3584e4, 0.22);
-    color: #3584e4;
-}
+/* ===================== Camera Optimizer (modules_gtk/camera_optimizer_view.py) ===================== */
 
-.trend-infocus {
-    background-color: alpha(#2ec27e, 0.25);
-    color: #2ec27e;
-}
+.camopt-card { padding: 16px; }
 
-.trend-overshot {
-    background-color: alpha(#e01b24, 0.28);
-    color: #e01b24;
-    font-weight: 800;
-}
+.camopt-panel { padding: 12px 14px; }
 
-.trend-tuning {
-    background-color: alpha(@theme_fg_color, 0.08);
-    color: @theme_fg_color;
-}
+.camopt-small { font-size: 12px; color: alpha(@window_fg_color, 0.62); }
 
-.peak-badge {
-    background-color: alpha(@theme_fg_color, 0.07);
-    border-radius: 9999px;
-    padding: 2px 10px;
-    font-size: 0.82em;
-    font-weight: 600;
-    opacity: 0.85;
-}
+.camopt-heading { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: alpha(@window_fg_color, 0.55); }
 
-/* ===================== Camera Optimizer v2 (Layout B) ===================== */
-/* Widgets live in modules_gtk/cam_calibration/widgets.py */
+.camopt-title { font-size: 17px; font-weight: 800; }
 
-/* Stepper */
-.optimizer-stepper { min-height: 32px; }
-.optimizer-stepper .step { font-size: 13px; font-weight: 600; color: alpha(@window_fg_color, 0.55); }
-.optimizer-stepper .step-num {
-    min-width: 24px;
-    min-height: 24px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 700;
-    background-color: alpha(@window_fg_color, 0.10);
-}
-.optimizer-stepper .step-current { color: @window_fg_color; }
-.optimizer-stepper .step-current .step-num { background-color: @accent_bg_color; color: @accent_fg_color; }
-.optimizer-stepper .step-done { color: @window_fg_color; }
-.optimizer-stepper .step-done .step-num { background-color: alpha(@success_color, 0.18); color: @success_color; }
-.optimizer-stepper .step-line {
-    min-width: 16px;
-    min-height: 2px;
-    border-radius: 2px;
-    background-color: alpha(@window_fg_color, 0.10);
-}
-.optimizer-stepper .step-line-done { background-color: alpha(@success_color, 0.45); }
+.camopt-dot { font-size: 10px; }
 
-/* Bottom action bar: one for the whole wizard */
-.optimizer-actionbar {
-    min-height: 72px;
-    padding-left: 24px;
-    padding-right: 24px;
-    border-top: 1px solid alpha(black, 0.30);
-}
-.optimizer-btn {
-    min-height: 48px;
-    padding-left: 22px;
-    padding-right: 22px;
-    border-radius: 10px;
-    font-size: 14.5px;
-    font-weight: 700;
-}
-.optimizer-btn.suggested-action { padding-left: 26px; padding-right: 26px; }
+.camopt-ok { color: #57e389; }
 
-/* Step heading in the right column */
-.step-head .title-3 { font-weight: 800; }
-.step-subtitle { font-size: 13.5px; }
+.camopt-warn { color: #f8e45c; }
 
-/* Large camera view (CameraView) */
-.cam-frame { border-radius: 12px; background-color: black; }
-.cam-frame .cam-ring { border-radius: 12px; border: 3px solid transparent; }
-.cam-frame-active .cam-ring { border-color: @accent_bg_color; }
-.cam-frame-dim > picture { opacity: 0.45; }
-.cam-caption { font-size: 13px; color: alpha(@window_fg_color, 0.58); }
+.camopt-bad { color: #ff7b63; }
 
-/* Chips on top of camera images */
-.osd-chip {
-    background-color: alpha(black, 0.66);
-    color: white;
-    border-radius: 999px;
-    min-height: 26px;
-    padding: 0 10px;
-    font-size: 12.5px;
-    font-weight: 700;
-}
-.osd-chip-small { min-height: 20px; padding: 0 7px; font-size: 11px; }
-.chip-dot {
-    min-width: 8px;
-    min-height: 8px;
-    border-radius: 999px;
-    background-color: currentColor;
-}
-.chip-ok { color: #57e389; }
-.chip-warn { color: #f8e45c; }
-.chip-bad { color: #ff7b63; }
-.chip-accent { color: @accent_color; }
-.chip-neutral { color: alpha(@window_fg_color, 0.65); }
-.osd-chip.chip-neutral { color: alpha(white, 0.70); }
-.osd-chip.chip-live { color: white; }
-.chip-live .chip-dot { background-color: #ff5f57; animation: optimizer-pulse 1.6s ease-in-out infinite; }
-@keyframes optimizer-pulse { 50% { opacity: 0.35; } }
+.camopt-neutral { color: alpha(@window_fg_color, 0.45); }
+
+/* control grid: one touch-sized (40 px) line per control */
+.camctl-label { font-size: 13px; }
+
+.camctl-grid > label.camctl-label { min-height: 40px; }
+
+.camctl-value { font-size: 12px; color: alpha(@window_fg_color, 0.70); }
+
+.camctl-grid switch { padding: 6px 10px; }
+
+.camopt-empty { font-size: 13px; color: alpha(@window_fg_color, 0.45); }
+
+.camopt-frame { border-radius: 10px; background-color: black; }
+
+.camopt-log { font-size: 12px; padding: 8px; border-radius: 8px; }
+
+.camopt-note { border-radius: 10px; padding: 10px 14px; background-color: alpha(@window_fg_color, 0.06); }
+
+.camopt-note-ok { background-color: alpha(#2ec27e, 0.18); }
+
+.camopt-note-warn { background-color: alpha(#e5a50a, 0.18); }
+
+.camopt-note-bad { background-color: alpha(#e01b24, 0.20); }
+
+.status-chip.chip-neutral { background-color: alpha(@window_fg_color, 0.09); color: alpha(@window_fg_color, 0.8); }
+
+/* camera strip: one card per camera, shared by Camera Controls and Camera Optimizer */
+button.cam-card { padding: 6px; border-radius: 12px; border: 2px solid transparent; background-color: alpha(@window_fg_color, 0.07); }
+
+button.cam-card.selected { border-color: @accent_bg_color; }
+
+.cam-thumb { border-radius: 8px; background-color: black; }
+
+/* control sections (collapsible) and rows */
+.camctl-sechead { padding: 0 16px; min-height: 48px; border-radius: 0; }
+
+.camctl-sec { border-bottom: 1px solid alpha(@window_fg_color, 0.08); }
+
+.camctl-sec-sum { font-size: 12px; color: alpha(@window_fg_color, 0.62); }
+
+.camctl-row { padding: 0 16px; min-height: 50px; }
+
+.camctl-hint { font-size: 11.5px; color: alpha(@window_fg_color, 0.5); padding: 0 16px 6px 16px; }
+
+button.cam-step { min-width: 38px; min-height: 38px; padding: 0; border-radius: 8px; font-weight: 700; font-size: 16px; }
+
+button.cam-revert { min-width: 38px; min-height: 38px; padding: 0; border-radius: 8px; color: #f8e45c; background-color: alpha(#e5a50a, 0.16); }
+
+.camctl-seg toggle { min-height: 34px; padding: 0 12px; font-size: 13px; }
+
+.camctl-value-btn { min-width: 64px; padding: 0 4px; font-size: 12px; font-weight: 600; }
+
+.camctl-grid scale trough { min-height: 8px; }
+
+.camctl-grid scale slider { min-width: 26px; min-height: 26px; }
+
+.camopt-tag { background-color: rgba(0, 0, 0, 0.65); color: white; border-radius: 7px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
+
+.camopt-table-head { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: alpha(@window_fg_color, 0.5); }
+
+.camopt-cell { font-size: 13px; font-weight: 400; }
+
+.camopt-cell.heading { font-weight: 700; }
 
 /* Tinted status pill (list rows, cards); never hexpand */
 .status-chip {
@@ -714,63 +393,37 @@ button.compact-btn,
     font-size: 12.5px;
     font-weight: 700;
 }
-.status-chip.chip-ok { background-color: alpha(#2ec27e, 0.18); }
-.status-chip.chip-warn { background-color: alpha(#e5a50a, 0.18); }
-.status-chip.chip-bad { background-color: alpha(#e01b24, 0.20); }
-.status-chip.chip-accent { background-color: alpha(@accent_bg_color, 0.22); }
-.status-chip.chip-live { background-color: alpha(#ff5f57, 0.16); color: #ff8a80; }
-.status-chip.chip-neutral { background-color: alpha(@window_fg_color, 0.08); }
 
-/* Tip close-up picture-in-picture */
-.tip-pip {
-    border-radius: 8px;
-    background-color: black;
-    border: 2px solid #ffd94a;
-    box-shadow: 0 0 0 2px alpha(black, 0.6);
+.status-chip.chip-ok { background-color: alpha(#2ec27e, 0.18); color: #57e389; }
+
+.status-chip.chip-warn { background-color: alpha(#e5a50a, 0.18); color: #f8e45c; }
+
+.status-chip.chip-bad { background-color: alpha(#e01b24, 0.20); color: #ff7b63; }
+
+/* Main menu update button when a new SUIT version is available */
+button.update-available-btn {
+    background: #e5a50a;
+    color: #1e1e1e;
 }
 
-/* Result banner (step 2) */
-.result-banner { border-radius: 12px; padding: 12px 16px; }
-.result-banner-compact { padding: 10px 12px; }
-.result-banner.result-ok { background-color: alpha(#2ec27e, 0.18); }
-.result-banner.result-warn { background-color: alpha(#e5a50a, 0.18); }
-.result-banner.result-bad { background-color: alpha(#e01b24, 0.20); }
-.result-banner .result-body { font-size: 13.5px; color: alpha(@window_fg_color, 0.78); }
+button.update-available-btn:hover { background: #f5c211; }
 
-/* Progress card (step 3) */
-.progress-card { padding: 14px 16px; }
-.optimizer-progress trough,
-.optimizer-progress progress { min-height: 8px; border-radius: 8px; }
-.stage-chip {
-    border-radius: 999px;
-    padding: 3px 10px;
-    font-size: 12.5px;
-    font-weight: 600;
-    background-color: alpha(@window_fg_color, 0.07);
-    color: alpha(@window_fg_color, 0.58);
+
+/* Language switch flags in the main menu banner */
+button.lang-flag-btn {
+    min-height: 0;
+    min-width: 0;
+    padding: 2px 3px;
+    border-radius: 4px;
+    background: none;
 }
-.stage-chip.stage-done { background-color: alpha(#2ec27e, 0.18); color: #57e389; }
-.stage-chip.stage-current { background-color: alpha(@accent_bg_color, 0.35); color: white; }
-
-/* Review tip grid (step 4) */
-.tip-crop { border-radius: 8px; background-color: black; }
-.tip-crop .tip-crop-ring { border-radius: 8px; border: 2px solid transparent; }
-.tip-crop-after .tip-crop-ring { border-color: alpha(#57e389, 0.55); }
-.tip-switcher button { min-height: 44px; font-weight: 700; }
-
-.tip-grid-header,
-.tip-grid-label { font-size: 12px; font-weight: 700; color: alpha(@window_fg_color, 0.58); }
-.review-outcome { font-size: 13.5px; color: alpha(@window_fg_color, 0.62); }
-
-/* Camera list rows */
-list.boxed-list.camera-list > row.camera-row { min-height: 60px; padding-top: 0; padding-bottom: 0; }
-list.boxed-list.camera-list > row.camera-row > box.header { min-height: 0; padding-top: 6px; padding-bottom: 6px; }
-list.boxed-list.camera-list > row.camera-row > box.header > box.title { padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
-.camera-row label.title { font-size: 15px; font-weight: 600; }
-.camera-row label.subtitle { font-size: 13px; }
-.camera-row .camera-thumb { border-radius: 6px; background-color: black; }
-
-/* Step 1 placement panel */
-.placement-card { padding: 12px; }
-.placement-num { font-weight: 700; min-width: 12px; }
-.placement-text { font-size: 13px; color: alpha(@window_fg_color, 0.65); }
+button.lang-flag-btn picture {
+    border-radius: 2px;
+    opacity: 0.3;
+}
+button.lang-flag-btn:hover picture {
+    opacity: 0.6;
+}
+button.lang-flag-btn:checked picture {
+    opacity: 0.9;
+}

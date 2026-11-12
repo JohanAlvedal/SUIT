@@ -76,6 +76,18 @@ passwordless sudo. No root account or global Python pip installation is needed.
   few minutes. Before `install.sh` has been rerun SUIT falls back to running
   the checkout's copy through `pkexec` - still one prompt per operation.
   Touch calibration still needs hardware validation.
+- Upstream sync 2026-11-12 (IteraThor/SUIT up to `a7c9ff6`):
+  - **Fast Boot** is hidden on Ubuntu. It edits dracut and GRUB through
+    passwordless sudo and masks Fedora units; Ubuntu needs initramfs-tools /
+    `update-grub` variants and the polkit helper first.
+  - **Minimal Desktop** needs GNOME 49+ and is disabled on Ubuntu 24.04
+    (GNOME 46). The **Hardware Overlay** extension supports GNOME 45+.
+    Both may collide with the Ubuntu Dock; test on hardware.
+  - **AutoGlow 2 Manager** runs its privileged steps through `admin_prefix()`
+    (Polkit prompt) instead of `sudo -n`. AutoGlow's own `setup.sh` still
+    needs testing on Ubuntu.
+  - The **system-upgrade repair** check and the oo7/TPM keyring path are
+    Fedora-only; on Ubuntu gnome-keyring is detected and the old flow is used.
 - No password dialogs at login: the rotation autostart only fixes the touch
   rule if that works without a prompt, otherwise it logs a warning.
 - **Restore** puts back the system's own defaults (`gsettings reset`), not

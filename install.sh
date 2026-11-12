@@ -33,7 +33,6 @@ echo "SUIT setup for ${PRETTY_NAME} (${DISTRO})"
 if [[ "${1:-}" == "--check" ]]; then
   echo "Read-only check: planned packages: ${PACKAGES[*]}"
   echo "Would install: /usr/libexec/suit/suit-helper and polkit action se.alvedal.suit.helper"
-  echo "The legacy uninstaller is never run automatically."
   exit 0
 fi
 if [[ $# -ne 0 ]]; then
@@ -42,7 +41,7 @@ if [[ $# -ne 0 ]]; then
 fi
 
 # Privileged actions here: package installation and the SUIT helper + polkit action.
-# Do not run the legacy uninstaller or change sudoers, login or keyring settings.
+# Do not change sudoers, login or keyring settings.
 if [[ "$DISTRO" == "ubuntu" ]]; then
   sudo apt-get update
   sudo apt-get install -y --no-install-recommends "${PACKAGES[@]}"
@@ -66,6 +65,11 @@ if [[ "$DISTRO" == "fedora" && -f "$HOME/.suit_rotation_config.json" ]]; then
   if ! (cd "$ROOT" && python3 -c "from core.display_service import DisplayService; DisplayService.ensure_autostart()"); then
     echo "  ! Warning: could not synchronize Fedora display autostart. Launch SUIT once to retry."
   fi
+fi
+# Pre-install the switchable SUIT shell extensions (disabled) so GNOME
+# discovers them at next login. User-level only; nothing is enabled here.
+if ! (cd "$ROOT" && python3 -c "from core.desktop_service import DesktopService; DesktopService.install_suit_extensions()"); then
+  echo "  ! Warning: could not pre-install the SUIT shell extensions. Launch SUIT once to retry."
 fi
 echo "SUIT installed. Start it from the Applications menu."
 echo "Some advanced Fedora-specific controls remain unavailable on Ubuntu."

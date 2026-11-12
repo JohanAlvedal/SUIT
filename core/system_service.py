@@ -9,6 +9,8 @@ from core.tailscale_service import TailscaleService
 from core.waydroid_service import WaydroidService
 from core.desktop_service import DesktopService
 from core.remote_desktop_service import RemoteDesktopService
+from core.boot_service import BootService, TWEAKS
+from core.i18n import tr
 
 
 class SystemService:
@@ -22,6 +24,7 @@ class SystemService:
     - WaydroidService (Waydroid container, libndk, apkeep, Darts Scorer)
     - DesktopService (GNOME dark mode, wallpaper, app grid folders)
     - RemoteDesktopService (GNOME RDP desktop sharing, remote control)
+    - BootService (Fast Boot tweak with exact revert)
     """
 
     # Sub-service class references for direct composition access
@@ -32,6 +35,7 @@ class SystemService:
     waydroid = WaydroidService
     desktop = DesktopService
     remote_desktop = RemoteDesktopService
+    boot = BootService
 
     # DebloatService constants
     BLOATWARE_PACKAGES = DebloatService.BLOATWARE_PACKAGES
@@ -59,6 +63,7 @@ class SystemService:
         self.waydroid = WaydroidService()
         self.desktop = DesktopService()
         self.remote_desktop = RemoteDesktopService()
+        self.boot = BootService()
 
     # --- PowerService delegation ---
     @staticmethod
@@ -113,6 +118,10 @@ class SystemService:
     @classmethod
     def reset_keyring_to_blank(cls, keyring_path: Path | None = None) -> tuple[bool, str]:
         return KeyringService.reset_keyring_to_blank.__func__(cls, keyring_path=keyring_path)
+
+    @staticmethod
+    def keyring_uses_oo7() -> bool:
+        return KeyringService.uses_oo7()
 
     @staticmethod
     def is_seahorse_installed() -> bool:
@@ -170,6 +179,14 @@ class SystemService:
     @classmethod
     def install_chromium(cls) -> tuple[bool, str]:
         return DebloatService.install_chromium.__func__(cls)
+
+    @staticmethod
+    def is_discord_installed() -> bool:
+        return DebloatService.is_discord_installed()
+
+    @classmethod
+    def install_discord(cls) -> tuple[bool, str]:
+        return DebloatService.install_discord.__func__(cls)
 
     # --- TailscaleService delegation ---
     @staticmethod
@@ -401,6 +418,76 @@ class SystemService:
     def open_gnome_sharing_settings(cls) -> bool:
         return RemoteDesktopService.open_gnome_sharing_settings.__func__(cls)
 
+    @staticmethod
+    def is_hw_overlay_enabled() -> bool:
+        return DesktopService.is_hw_overlay_enabled()
+
+    @staticmethod
+    def set_hw_overlay(enabled: bool) -> tuple[bool, str]:
+        return DesktopService.set_hw_overlay(enabled)
+
+    @staticmethod
+    def hw_overlay_needs_relogin() -> bool:
+        return DesktopService.hw_overlay_needs_relogin()
+
+    @staticmethod
+    def is_minimal_desktop_enabled() -> bool:
+        return DesktopService.is_minimal_desktop_enabled()
+
+    @staticmethod
+    def set_minimal_desktop(enabled: bool) -> tuple[bool, str]:
+        return DesktopService.set_minimal_desktop(enabled)
+
+    @staticmethod
+    def minimal_desktop_needs_relogin() -> bool:
+        return DesktopService.minimal_desktop_needs_relogin()
+
+    @staticmethod
+    def get_hw_overlay_config() -> dict:
+        return DesktopService.get_hw_overlay_config()
+
+    @staticmethod
+    def save_hw_overlay_config(cfg: dict) -> dict:
+        return DesktopService.save_hw_overlay_config(cfg)
+
+    # --- BootService delegation ---
+    @staticmethod
+    def is_fast_boot_enabled() -> bool:
+        return BootService.is_fast_boot_enabled()
+
+    @staticmethod
+    def set_fast_boot(enabled: bool) -> tuple[bool, str]:
+        return BootService.set_fast_boot(enabled)
+
+    @staticmethod
+    def get_boot_tweak_counts() -> tuple[int, int]:
+        """(applied, total) Fast Boot tweaks, cheap enough for the System page row."""
+        return BootService.applied_count(), len(TWEAKS)
+
+    @staticmethod
+    def get_boot_tweaks() -> list[dict]:
+        return BootService.get_tweaks()
+
+    @staticmethod
+    def set_boot_tweak(tweak_id: str, enabled: bool) -> tuple[bool, str]:
+        return BootService.set_tweak(tweak_id, enabled)
+
+    @staticmethod
+    def get_boot_report() -> dict | None:
+        return BootService.get_boot_report()
+
+    @staticmethod
+    def analyze_firmware(report: dict | None = None) -> dict:
+        return BootService.analyze_firmware(report)
+
+    @staticmethod
+    def reboot_to_firmware() -> tuple[bool, str]:
+        return BootService.reboot_to_firmware()
+
+    @staticmethod
+    def get_last_boot_time() -> float | None:
+        return BootService.get_last_boot_time()
+
     # --- Facade composite operations ---
     @classmethod
     def get_recommended_status(cls, user: str) -> dict:
@@ -540,7 +627,7 @@ class SystemService:
             except Exception as e:
                 logger.exception("Error executing step %s during apply_all", title)
                 success = False
-                msg = f"Error: {e}"
+                msg = tr("Error: {msg}").format(msg=e)
 
             results.append({"step": title, "success": success, "message": msg})
 
@@ -549,7 +636,7 @@ class SystemService:
             summary_msg = "All system configurations applied successfully."
         else:
             failed = [r["step"] for r in results if not r["success"]]
-            summary_msg = f"Completed with warnings on: {', '.join(failed)}."
+            summary_msg = tr("Completed with warnings on: {steps}.").format(steps=", ".join(tr(s) for s in failed))
 
         return all_success, summary_msg, results
 
